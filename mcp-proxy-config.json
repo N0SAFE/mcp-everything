@@ -1,0 +1,13 @@
+{
+  "servers": [],
+  "security": {
+    "globalBlockedTools": [],
+    "allowServerDiscovery": true,
+    "defaultRequireAuth": false
+  },
+  "discovery": {
+    "enabled": true,
+    "allowRuntimeServerAddition": true,
+    "serverMetadataExposure": "full"
+  }
+}
