@@ -94,6 +94,7 @@
     }
   },
   "scripts": {
+    "postinstall": "patch-package",
     "dev": "docker compose down && docker compose up",
     "dev:api": "bun --bun run dev:api:down && docker compose -f ./docker-compose.api.yml up",
     "dev:web": "bun --bun run dev:web:down && docker compose -f ./docker-compose.web.yml up",
