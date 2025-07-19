@@ -22,7 +22,7 @@
     "@tanstack/eslint-plugin-query": "catalog:query",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
-    "@vercel/style-guide": "^5.2.0",
+    "@vercel/style-guide": "^6.0.0",
     "eslint": "catalog:linting",
     "eslint-config-next": "^14.2.3",
     "eslint-config-prettier": "^9.1.0",
