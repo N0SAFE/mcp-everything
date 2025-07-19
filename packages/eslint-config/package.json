@@ -32,6 +32,6 @@
     "eslint-plugin-react": "^7.34.2",
     "eslint-plugin-react-refresh": "^0.4.7",
     "typescript": "catalog:build",
-    "typescript-eslint": "^7.13.0"
+    "typescript-eslint": "^8.37.0"
   }
 }
