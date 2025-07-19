@@ -365,7 +365,7 @@ export class ToolManager {
         `Tool not enabled: ${req.params.name}`
       );
     }
-    if (!req.params.arguments) {
+    if (req.params.arguments === null || req.params.arguments === undefined) {
       throw new McpError(
         ErrorCode.InvalidParams,
         `Invalid parameters: ${req.params.arguments}`
@@ -401,6 +401,11 @@ export class ToolManager {
   }
 
   protected async notifyEnabledToolsChanged() {
+    // Only notify if listTools has been called at least once
+    if (!this.lastInfoOpts) {
+      return;
+    }
+    
     // Create a request with default params to satisfy the type requirement
     const req = {
       ...this.lastInfoOpts[0],
