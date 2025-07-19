@@ -94,7 +94,6 @@
     }
   },
   "scripts": {
-    "postinstall": "patch-package",
     "dev": "docker compose down && docker compose up",
     "dev:api": "bun --bun run dev:api:down && docker compose -f ./docker-compose.api.yml up",
     "dev:web": "bun --bun run dev:web:down && docker compose -f ./docker-compose.web.yml up",
@@ -161,7 +160,7 @@
     "@repo/eslint-config": "dotenv -e .env -- bun --bun --cwd=./packages/eslint-config run --",
     "@repo/directus-sdk": "dotenv -e .env -- bun --bun --cwd=./packages/directus-sdk run --",
     ".": "dotenv -e .env -- bun --bun --cwd=./ run --",
-    "rm:node_modules": "concurrently \"bun --bun x rimraf node_modules\" \"bun --bun x rimraf --glob packages/*/node_modules\" \"bun --bun x rimraf --glob apps/*/node_modules\"",
+    "rm:node_modules": "concurrently \"bun --bun x rimraf --glob packages/*/node_modules\" \"bun --bun x rimraf --glob apps/*/node_modules\"",
     " ": " "
   },
   "devDependencies": {
