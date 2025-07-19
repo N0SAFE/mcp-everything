@@ -22,7 +22,7 @@ export class ToolManager {
   protected enabledToolSubscriptions: Set<(tools: ToolListResponse) => void> =
     new Set();
   protected mcpServerName: string;
-  private lastInfoOpts!: [
+  private lastInfoOpts?: [
     { method: "tools/list"; params?: Record<string, unknown> },
     {
       signal: AbortSignal;
@@ -396,6 +396,11 @@ export class ToolManager {
   }
 
   protected async notifyEnabledToolsChanged() {
+    // Check if lastInfoOpts has been initialized
+    if (!this.lastInfoOpts) {
+      return; // Cannot notify without valid options
+    }
+    
     // Create a request with default params to satisfy the type requirement
     const req = {
       ...this.lastInfoOpts[0],

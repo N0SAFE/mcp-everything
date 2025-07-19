@@ -590,7 +590,7 @@ main().catch(console.error);
     if (urls && urls.length > 0) {
       if (serverType === "openapi") {
         configuration.openApiUrl = urls[0];
-        configuration.baseUrl = urls[1] || urls[0].replace(/\/[^\/]*$/, '');
+        configuration.baseUrl = urls.length > 1 ? urls[1] : urls[0].replace(/\/[^\/]*$/, '');
       } else if (serverType === "webhook") {
         configuration.webhookUrl = urls[0];
       }
