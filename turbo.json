@@ -1,0 +1,79 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "ui": "tui",
+    "globalDependencies": ["**/.env.*local", "**/.env", ".env.local"],
+    "globalPassThroughEnv": [".env.local"],
+    "globalEnv": ["NEXT_PUBLIC_API_URL", "API_PING_PATH", "API_ADMIN_TOKEN", "TEMP_APP_NEXTAUTH_URL", "NEXT_AUTH"],
+    "tasks": {
+        "dev": {
+            "cache": false,
+            "persistent": true,
+            "dependsOn": ["^dev"]
+        },
+        "build": {
+            "dependsOn": ["^build"],
+            "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
+            "inputs": ["src/**", "public/**", "*.config.*", "package.json"]
+        },
+        "start": {
+            "cache": false,
+            "persistent": true,
+            "dependsOn": ["build"]
+        },
+        "docker:build": {
+            "cache": false,
+            "dependsOn": ["build"]
+        },
+        "docker:dev": {
+            "cache": false,
+            "persistent": true
+        },
+        "init": {
+            "dependsOn": ["^init", "clean"],
+            "outputs": ["dist/**"],
+            "cache": false
+        },
+        "generate:directus:types": {
+            "cache": false,
+            "dependsOn": ["^generate:directus:types"]
+        },
+        "generate": {
+            "dependsOn": ["^generate", "generate:directus:types"],
+            "cache": false
+        },
+        "test": {
+            "dependsOn": ["^build"],
+            "inputs": ["src/**", "test/**", "**/*.test.*", "**/*.spec.*", "*.config.*", "vitest.config.*", "vitest.setup.*"]
+        },
+        "test:watch": {
+            "cache": false,
+            "persistent": true,
+            "dependsOn": ["^build"]
+        },
+        "test:ui": {
+            "cache": false,
+            "persistent": true,
+            "dependsOn": ["^build"]
+        },
+        "test:coverage": {
+            "dependsOn": ["^build"],
+            "outputs": ["coverage/**"],
+            "inputs": ["src/**", "test/**", "**/*.test.*", "**/*.spec.*", "*.config.*", "vitest.config.*", "vitest.setup.*"]
+        },
+        "lint": {
+            "cache": false,
+            "inputs": ["src/**", "*.config.*", "package.json"]
+        },
+        "prettify": {
+            "dependsOn": ["^lint"],
+            "cache": false
+        },
+        "clean": {
+            "cache": false
+        },
+        "type-check": {
+            "cache": false,
+            "inputs": ["src/**", "*.config.*", "package.json", "tsconfig.json"]
+        }
+    }
+}

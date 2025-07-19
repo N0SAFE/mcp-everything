@@ -1,0 +1,103 @@
+services:
+  # Database for API
+  api-db-prod:
+    container_name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}-api-db-prod
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_DATABASE:-directus}
+    volumes:
+      - api_db_data_prod:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p$$MYSQL_ROOT_PASSWORD",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - api_network_prod
+
+  # Redis cache for API
+  api-cache-prod:
+    container_name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}-api-cache-prod
+    image: redis:8
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "[ $$(redis-cli ping) = 'PONG' ]"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_interval: 5s
+      start_period: 30s
+    networks:
+      - api_network_prod
+
+  # Directus API service
+  api-prod:
+    container_name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}-api-prod
+    image: directus/directus:11.8.0
+    depends_on:
+      api-db-prod:
+        condition: service_healthy
+      api-cache-prod:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "${NEXT_PUBLIC_API_PORT:-8055}:8055"
+    volumes:
+      - ./apps/api/uploads:/directus/uploads
+      - ./apps/api/extensions:/directus/extensions
+    environment:
+      SECRET: "replace-with-secure-random-value"
+      DB_CLIENT: mysql
+      DB_HOST: api-db-prod
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE:-directus}
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD:-rootpassword}
+      CACHE_ENABLED: "true"
+      CACHE_AUTO_PURGE: "true"
+      CACHE_STORE: "redis"
+      REDIS: "redis://api-cache-prod:6379"
+      ADMIN_EMAIL: "admin@admin.com"
+      ADMIN_PASSWORD: "adminadmin"
+      ADMIN_TOKEN: ${API_ADMIN_TOKEN:-secret-admin-token}
+      PUBLIC_URL: http://localhost:${NEXT_PUBLIC_API_PORT:-8055}
+      # CORS Configuration for cross-origin requests from web app
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "${NEXT_PUBLIC_APP_URL:-http://localhost:3000}"
+      CORS_METHODS: "GET,POST,PATCH,DELETE,OPTIONS"
+      CORS_ALLOWED_HEADERS: "Content-Type,Authorization,X-Requested-With"
+      CORS_CREDENTIALS: "true"
+      # Production optimizations
+      LOG_LEVEL: "warn"
+      RATE_LIMITER_ENABLED: "true"
+      RATE_LIMITER_POINTS: 25
+      RATE_LIMITER_DURATION: 1
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://127.0.0.1:8055/server/health || exit 1
+      start_period: 15s
+      interval: 15s
+      timeout: 15s
+      retries: 5
+    networks:
+      - api_network_prod
+
+networks:
+  api_network_prod:
+    name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}_api_network_prod
+    driver: bridge
+
+volumes:
+  api_db_data_prod:
+    name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}_api_db_data_prod

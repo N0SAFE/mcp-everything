@@ -1,0 +1,24 @@
+{
+  "name": "@repo/prettier-config",
+  "version": "1.0.0",
+  "exports": {
+    "./base": "./prettierrc.base.js",
+    "./tailwind": "./prettierrc.tailwind.js"
+  },
+  "scripts": {
+    " ": " ",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@repo/vitest-config": "*",
+    "prettier": "catalog:linting",
+    "prettier-plugin-tailwindcss": "catalog:linting",
+    "vitest": "catalog:testing"
+  }
+}

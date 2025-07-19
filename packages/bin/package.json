@@ -1,0 +1,20 @@
+{
+  "name": "@repo/bin",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    " ": " ",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "devDependencies": {
+    "@repo/vitest-config": "*",
+    "vitest": "catalog:testing",
+    "@types/node": "catalog:build"
+  },
+  "type": "commonjs"
+}
