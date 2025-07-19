@@ -46,22 +46,27 @@ export class ToolManager {
     this.toolsCapabilities.forEach((capability) => {
       this.tools.set(capability.definition.name, capability);
     });
-    if (this.dynamicToolDiscovery?.enabled) {
-      this.dynamicToolDiscovery.defaultEnabledToolsets?.forEach((toolName) => {
+    
+    // Enable tools based on toolset config mode
+    this.tools.forEach((_, name) => {
+      if (this.toolsetConfig.mode === "readWrite") {
+        this.enabledTools.add(name);
+      }
+      if (
+        this.toolsetConfig.mode === "readOnly" &&
+        this.tools.get(name)?.definition.annotations?.readOnlyHint
+      ) {
+        this.enabledTools.add(name);
+      }
+    });
+    
+    // If dynamic tool discovery is enabled, override with defaultEnabledToolsets
+    if (this.dynamicToolDiscovery?.enabled && this.dynamicToolDiscovery.defaultEnabledToolsets) {
+      // Clear enabled tools if defaultEnabledToolsets is explicitly provided
+      this.enabledTools.clear();
+      this.dynamicToolDiscovery.defaultEnabledToolsets.forEach((toolName) => {
         if (this.tools.get(toolName)) {
           this.enabledTools.add(toolName);
-        }
-      });
-    } else {
-      this.tools.forEach((_, name) => {
-        if (this.toolsetConfig.mode === "readWrite") {
-          this.enabledTools.add(name);
-        }
-        if (
-          this.toolsetConfig.mode === "readOnly" &&
-          this.tools.get(name)?.definition.annotations?.readOnlyHint
-        ) {
-          this.enabledTools.add(name);
         }
       });
     }
