@@ -11,6 +11,7 @@ import {
 } from "../types.js";
 import { createTool, createToolDefinition } from "../utils/tools.js";
 import { z } from "zod";
+import { ToolCapability } from '../types';
 
 export class ProxyMcpServer extends McpServer {
   private backendServerManager: BackendServerManager;
@@ -66,8 +67,8 @@ export class ProxyMcpServer extends McpServer {
       proxyToolManager
     );
 
-    // Combine with existing proxy tools
-    const allTools = [...serverManagementTools, ...dynamicServerTools];
+    // Combine with existing proxy tools - pass empty array since we'll add tools directly to proxyToolManager
+    const allTools: ToolCapability[] = [];
 
     // Enhanced instructions for proxy server
     const proxyInstructions = `
@@ -122,6 +123,15 @@ ${instructions || ""}`;
     this.backendServerManager = backendServerManager;
     this.proxyToolManager = proxyToolManager;
     this.dynamicServerCreator = dynamicServerCreator;
+
+    // Override the parent's toolManager with our proxyToolManager
+    // @ts-ignore - accessing private field
+    this.toolManager = proxyToolManager;
+
+    // Add server management and dynamic server tools to the proxy tool manager
+    for (const tool of [...serverManagementTools, ...dynamicServerTools]) {
+      proxyToolManager.addTool(tool);
+    }
 
     // Set up cleanup on shutdown
     process.on("SIGTERM", () => this.shutdownProxy());

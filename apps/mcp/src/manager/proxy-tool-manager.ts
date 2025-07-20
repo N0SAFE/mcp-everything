@@ -367,4 +367,8 @@ export class ProxyToolManager extends ToolManager {
       });
     });
   }
+
+  getAllTools(): ToolCapability[] {
+    return Array.from(this.tools.values());
+  }
 }

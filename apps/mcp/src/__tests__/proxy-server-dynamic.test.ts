@@ -80,7 +80,10 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolOptions()
       );
 
-      expect(result.content[0].text).toContain('Successfully');
+      expect(result.content[0].text).toBeDefined();
+      const response = JSON.parse(result.content[0].text);
+      expect(response.enabled).toBeDefined();
+      expect(response.enabled.length).toBeGreaterThan(0);
     });
   });
 
@@ -124,8 +127,8 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
 
       expect(result.content).toBeDefined();
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toContain('successfully created');
-      expect(result.content[0].text).toContain('OpenAPI server');
+      expect(result.content[0].text).toContain('Successfully created');
+      expect(result.content[0].text).toContain('openapi');
     });
 
     it('should create a webhook server from instructions', async () => {
@@ -143,8 +146,8 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
 
       expect(result.content).toBeDefined();
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toContain('successfully created');
-      expect(result.content[0].text).toContain('webhook server');
+      expect(result.content[0].text).toContain('Successfully created');
+      expect(result.content[0].text).toContain('webhook');
     });
 
     it('should create a database server from instructions', async () => {
@@ -163,8 +166,8 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
 
       expect(result.content).toBeDefined();
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toContain('successfully created');
-      expect(result.content[0].text).toContain('database server');
+      expect(result.content[0].text).toContain('Successfully created');
+      expect(result.content[0].text).toContain('database');
     });
 
     it('should create a custom server from instructions', async () => {
@@ -183,8 +186,8 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
 
       expect(result.content).toBeDefined();
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toContain('successfully created');
-      expect(result.content[0].text).toContain('custom server');
+      expect(result.content[0].text).toContain('Successfully created');
+      expect(result.content[0].text).toContain('custom');
     });
 
     it('should use custom server ID when provided', async () => {
@@ -254,7 +257,9 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
 
       expect(result.content).toBeDefined();
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toContain('No generated servers found');
+      const response = JSON.parse(result.content[0].text);
+      expect(response.generatedServers).toEqual([]);
+      expect(response.totalGenerated).toBe(0);
     });
 
     it('should list generated servers after creation', async () => {
@@ -279,8 +284,10 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
 
       expect(result.content).toBeDefined();
       expect(result.content[0].type).toBe('text');
-      expect(result.content[0].text).toContain('Generated servers:');
-      expect(result.content[0].text).toContain('test server');
+      const response = JSON.parse(result.content[0].text);
+      expect(response.generatedServers).toHaveLength(1);
+      expect(response.totalGenerated).toBe(1);
+      expect(response.generatedServers[0].name).toContain('test server');
     });
 
     it('should include instructions when requested', async () => {
@@ -329,7 +336,10 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolOptions()
       );
 
-      expect(result.content[0].text).not.toContain(instructions);
+      expect(result.content[0].text).toBeDefined();
+      const response = JSON.parse(result.content[0].text);
+      expect(response.generatedServers).toHaveLength(1);
+      expect(response.generatedServers[0].originalInstructions).toBeUndefined();
     });
   });
 
@@ -346,7 +356,7 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolOptions()
       );
 
-      expect(createResult.content[0].text).toContain('successfully created');
+      expect(createResult.content[0].text).toContain('Successfully created');
 
       // Verify it exists
       const listResult1 = await proxyServer['toolManager'].callTool(
@@ -363,14 +373,16 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolOptions()
       );
 
-      expect(removeResult.content[0].text).toContain('successfully removed');
+      expect(removeResult.content[0].text).toContain('removed successfully');
 
       // Verify it's gone
       const listResult2 = await proxyServer['toolManager'].callTool(
         createCallToolRequest('test-proxy-server__proxy_list_generated_servers', {}),
         createCallToolOptions()
       );
-      expect(listResult2.content[0].text).toContain('No generated servers found');
+      const response2 = JSON.parse(listResult2.content[0].text);
+      expect(response2.generatedServers).toEqual([]);
+      expect(response2.totalGenerated).toBe(0);
     });
 
     it('should handle removal of non-existent server', async () => {
@@ -445,7 +457,9 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolRequest('test-proxy-server__proxy_list_generated_servers', {}),
         createCallToolOptions()
       );
-      expect(listResult3.content[0].text).toContain('No generated servers found');
+      const response = JSON.parse(listResult3.content[0].text);
+      expect(response.generatedServers).toEqual([]);
+      expect(response.totalGenerated).toBe(0);
     });
   });
 });
