@@ -11,6 +11,7 @@ import {
 } from "../types.js";
 import { createTool, createToolDefinition } from "../utils/tools.js";
 import { z } from "zod";
+import { ToolCapability } from '../types';
 
 export class ProxyMcpServer extends McpServer {
   private backendServerManager: BackendServerManager;
