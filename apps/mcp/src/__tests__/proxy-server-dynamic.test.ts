@@ -356,7 +356,7 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolOptions()
       );
 
-      expect(createResult.content[0].text).toContain('successfully created');
+      expect(createResult.content[0].text).toContain('Successfully created');
 
       // Verify it exists
       const listResult1 = await proxyServer['toolManager'].callTool(
@@ -373,14 +373,16 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolOptions()
       );
 
-      expect(removeResult.content[0].text).toContain('successfully removed');
+      expect(removeResult.content[0].text).toContain('removed successfully');
 
       // Verify it's gone
       const listResult2 = await proxyServer['toolManager'].callTool(
         createCallToolRequest('test-proxy-server__proxy_list_generated_servers', {}),
         createCallToolOptions()
       );
-      expect(listResult2.content[0].text).toContain('No generated servers found');
+      const response2 = JSON.parse(listResult2.content[0].text);
+      expect(response2.generatedServers).toEqual([]);
+      expect(response2.totalGenerated).toBe(0);
     });
 
     it('should handle removal of non-existent server', async () => {
@@ -455,7 +457,9 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
         createCallToolRequest('test-proxy-server__proxy_list_generated_servers', {}),
         createCallToolOptions()
       );
-      expect(listResult3.content[0].text).toContain('No generated servers found');
+      const response = JSON.parse(listResult3.content[0].text);
+      expect(response.generatedServers).toEqual([]);
+      expect(response.totalGenerated).toBe(0);
     });
   });
 });

@@ -443,4 +443,14 @@ export class ToolManager {
   hasTools() {
     return this.tools.size > 0;
   }
+
+  addTool(toolCapability: ToolCapability) {
+    this.tools.set(toolCapability.definition.name, toolCapability);
+    
+    // Enable the tool based on configuration
+    if (this.toolsetConfig.mode === "readWrite" || 
+        (toolCapability.definition.annotations?.readOnlyHint !== false)) {
+      this.enabledTools.add(toolCapability.definition.name);
+    }
+  }
 }
