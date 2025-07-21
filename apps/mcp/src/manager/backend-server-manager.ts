@@ -10,6 +10,7 @@ import {
   AuthInfo,
 } from "../types.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { OAuthProxyManager } from "./oauth-proxy-manager.js";
 
 export interface BackendServerConnection {
   config: BackendServerConfig;
@@ -34,8 +35,10 @@ export class BackendServerManager {
   private failedServers: Map<string, FailedServerAttempt> = new Map();
   private reconnectIntervals: Map<string, NodeJS.Timeout> = new Map();
   private _initialized: Promise<void>;
+  private oauthManager: OAuthProxyManager;
 
   constructor(private serverConfigs: BackendServerConfig[]) {
+    this.oauthManager = new OAuthProxyManager();
     this._initialized = this.initializeServers();
   }
 
@@ -154,6 +157,15 @@ export class BackendServerManager {
     } catch (error) {
       console.error(`Failed to connect to server ${config.id}:`, error);
       
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check if this is an OAuth-related error
+      const needsOAuth = await this.oauthManager.detectOAuthRequirement(config.id, config, errorMessage);
+      
+      if (needsOAuth) {
+        console.error(`🔐 OAuth requirement detected for server ${config.id}`);
+      }
+      
       // Track failed server attempt
       const existingFailure = this.failedServers.get(config.id);
       const now = new Date();
@@ -162,7 +174,7 @@ export class BackendServerManager {
         // Update existing failure record
         existingFailure.attemptCount++;
         existingFailure.lastAttempt = now;
-        existingFailure.status.lastError = error instanceof Error ? error.message : String(error);
+        existingFailure.status.lastError = errorMessage;
       } else {
         // Create new failure record
         const failedAttempt: FailedServerAttempt = {
@@ -170,7 +182,7 @@ export class BackendServerManager {
           status: {
             id: config.id,
             connected: false,
-            lastError: error instanceof Error ? error.message : String(error),
+            lastError: errorMessage,
           },
           attemptCount: 1,
           firstFailure: now,
@@ -423,5 +435,33 @@ export class BackendServerManager {
       this.disconnectServer(serverId)
     );
     await Promise.all(disconnectPromises);
+  }
+
+  /**
+   * Get the OAuth proxy manager
+   */
+  getOAuthManager(): OAuthProxyManager {
+    return this.oauthManager;
+  }
+
+  /**
+   * Get servers that need OAuth authentication
+   */
+  getOAuthServers() {
+    return this.oauthManager.getOAuthServers();
+  }
+
+  /**
+   * Check if a server needs OAuth
+   */
+  serverNeedsOAuth(serverId: string): boolean {
+    return this.oauthManager.serverNeedsOAuth(serverId);
+  }
+
+  /**
+   * Get OAuth authorization URL for a server
+   */
+  getOAuthAuthorizationUrl(serverId: string, redirectUri: string, scopes?: string[]): string | undefined {
+    return this.oauthManager.getAuthorizationUrl(serverId, redirectUri, scopes);
   }
 }

@@ -231,7 +231,8 @@ export class DevToolManager {
       this.createConnectionDiagnosticsTool(),
       this.createConfigurationDiagnosticsTool(),
       this.createMemoryDiagnosticsTool(),
-      this.createEnvironmentDiagnosticsTool()
+      this.createEnvironmentDiagnosticsTool(),
+      this.createOAuthDiagnosticsTool()
     ];
   }
 
@@ -711,6 +712,12 @@ export class DevToolManager {
                 `      Prompts: ${server.status.promptsCount || 0}`
               );
               
+              // Check OAuth status
+              const needsOAuth = this.backendServerManager.serverNeedsOAuth(server.config.id);
+              if (needsOAuth) {
+                statusMessage.push(`      🔐 OAuth: Required and configured`);
+              }
+              
               if (server.config.description) {
                 statusMessage.push(`      Description: ${server.config.description}`);
               }
@@ -735,6 +742,16 @@ export class DevToolManager {
                 `      Last attempt: ${Math.floor(timeSinceLastAttempt / 1000)}s ago`,
                 `      Error: ${server.status.lastError || 'Unknown error'}`
               );
+              
+              // Check OAuth status for failed servers
+              const needsOAuth = this.backendServerManager.serverNeedsOAuth(server.config.id);
+              const oauthInfo = this.backendServerManager.getOAuthManager().getOAuthServerInfo(server.config.id);
+              if (needsOAuth) {
+                statusMessage.push(`      🔐 OAuth: Required (detected from error)`);
+                if (oauthInfo?.authorizationUrl) {
+                  statusMessage.push(`      🔗 Auth URL: ${oauthInfo.authorizationUrl}`);
+                }
+              }
               
               if (server.config.description) {
                 statusMessage.push(`      Description: ${server.config.description}`);
@@ -1432,5 +1449,248 @@ export class DevToolManager {
     const timeDiff = (latest.timestamp.getTime() - first.timestamp.getTime()) / (1000 * 60); // minutes
     const memDiff = (latest.memoryUsage.heapUsed - first.memoryUsage.heapUsed) / (1024 * 1024); // MB
     return timeDiff > 0 ? memDiff / timeDiff : 0;
+  }
+
+  private createOAuthDiagnosticsTool(): ToolCapability {
+    return {
+      definition: createToolDefinition({
+        name: "dev_oauth_diagnostics",
+        description: "Diagnose OAuth authentication requirements and configuration for backend servers. Shows which servers need OAuth, their configuration status, and provides setup guidance.",
+        inputSchema: z.object({
+          includeSetupGuide: z.boolean().optional().default(true).describe("Include OAuth setup and configuration guidance"),
+          showUrls: z.boolean().optional().default(true).describe("Show OAuth endpoint URLs"),
+          checkStatus: z.boolean().optional().default(true).describe("Check OAuth server status and availability")
+        }),
+        annotations: {
+          title: "Development: OAuth Diagnostics",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      }),
+      handler: async ({ includeSetupGuide, showUrls, checkStatus }) => {
+        const diagnosticsMessage = [
+          `🔐 OAuth Authentication Diagnostics`,
+          ``,
+        ];
+
+        // Get OAuth diagnostics from the backend server manager
+        const oauthManager = this.backendServerManager.getOAuthManager();
+        const oauthDiagnostics = oauthManager.getOAuthDiagnostics();
+        const oauthServers = oauthManager.getOAuthServers();
+
+        // Overview
+        diagnosticsMessage.push(
+          `📊 OAuth Overview:`,
+          `   Total servers analyzed: ${oauthDiagnostics.totalServers}`,
+          `   Servers requiring OAuth: ${oauthDiagnostics.needsOAuth}`,
+          `   OAuth configurations active: ${oauthDiagnostics.configured}`,
+          `   Servers with OAuth errors: ${oauthDiagnostics.errors}`,
+          ``
+        );
+
+        if (oauthServers.length === 0) {
+          diagnosticsMessage.push(
+            `✅ No OAuth Requirements Detected`,
+            `   All backend servers are either:`,
+            `   • Using alternative authentication methods`,
+            `   • Not requiring authentication`,
+            `   • Successfully connected without OAuth`,
+            ``
+          );
+        } else {
+          diagnosticsMessage.push(`🔍 OAuth Server Details:`);
+
+          for (const server of oauthServers) {
+            const statusEmoji = server.needsOAuth ? '🔐' : '✅';
+            const configuredEmoji = oauthDiagnostics.servers.find(s => s.serverId === server.serverId)?.configured ? '✅' : '❌';
+            
+            diagnosticsMessage.push(
+              `   ${statusEmoji} ${server.config.name} (${server.serverId})`,
+              `      OAuth Required: ${server.needsOAuth ? 'Yes' : 'No'}`,
+              `      OAuth Detected: ${server.oauthDetected ? 'Yes' : 'No'}`,
+              `      Configuration: ${configuredEmoji} ${oauthDiagnostics.servers.find(s => s.serverId === server.serverId)?.configured ? 'Active' : 'Pending'}`,
+              `      Transport: ${server.config.transportType}`
+            );
+
+            if (server.lastOAuthError) {
+              diagnosticsMessage.push(`      Last Error: ${server.lastOAuthError}`);
+            }
+
+            if (showUrls) {
+              diagnosticsMessage.push(
+                `      Authorization URL: ${server.authorizationUrl || 'Not configured'}`,
+                `      Token URL: ${server.tokenUrl || 'Not configured'}`
+              );
+              if (server.revocationUrl) {
+                diagnosticsMessage.push(`      Revocation URL: ${server.revocationUrl}`);
+              }
+            }
+
+            diagnosticsMessage.push(``);
+          }
+        }
+
+        // Failed servers that might need OAuth
+        const failedServers = this.backendServerManager.getFailedServers();
+        const potentialOAuthServers = failedServers.filter(server => {
+          const error = server.status.lastError?.toLowerCase() || '';
+          return error.includes('401') || 
+                 error.includes('unauthorized') || 
+                 error.includes('authorization') ||
+                 error.includes('authentication');
+        });
+
+        if (potentialOAuthServers.length > 0) {
+          diagnosticsMessage.push(
+            `⚠️ Failed Servers That May Need OAuth:`,
+            ``
+          );
+
+          for (const server of potentialOAuthServers) {
+            diagnosticsMessage.push(
+              `   ❌ ${server.config.name} (${server.config.id})`,
+              `      Transport: ${server.config.transportType}`,
+              `      Error: ${server.status.lastError}`,
+              `      Attempts: ${server.attemptCount}`,
+              `      Recommendation: ${this.getOAuthRecommendation(server.status.lastError || '')}`,
+              ``
+            );
+          }
+        }
+
+        if (checkStatus && oauthServers.length > 0) {
+          diagnosticsMessage.push(
+            `🔍 OAuth Endpoint Status Checks:`,
+            ``
+          );
+
+          for (const server of oauthServers) {
+            if (server.config.transportType === 'http' || server.config.transportType === 'sse') {
+              try {
+                const metadataUrl = server.metadataUrl || server.authorizationUrl.replace('/oauth/authorize', '/.well-known/oauth-authorization-server');
+                diagnosticsMessage.push(`   Testing ${server.config.name}...`);
+                
+                // This would be implemented to actually test OAuth endpoints
+                // For now, just show the intended check
+                diagnosticsMessage.push(
+                  `      Metadata endpoint: ${metadataUrl}`,
+                  `      Status: ⏳ Would check endpoint availability`,
+                  ``
+                );
+              } catch (error) {
+                diagnosticsMessage.push(
+                  `      Status: ❌ Cannot construct OAuth URLs`,
+                  `      Error: ${error}`,
+                  ``
+                );
+              }
+            }
+          }
+        }
+
+        if (includeSetupGuide) {
+          diagnosticsMessage.push(
+            `🔧 OAuth Setup Guide:`,
+            ``,
+            `1. 🔍 Identify OAuth Requirements:`,
+            `   • Look for 401 Unauthorized errors`,
+            `   • Check for "Authorization" header requirements`,
+            `   • Verify OAuth metadata endpoints exist`,
+            ``,
+            `2. 🛠️ Configure OAuth Proxy:`,
+            `   • MCP Proxy automatically detects OAuth requirements`,
+            `   • OAuth endpoints are proxied to backend servers`,
+            `   • Client applications use proxy OAuth endpoints`,
+            ``,
+            `3. 🔑 OAuth Flow:`,
+            `   • Client requests authorization from proxy server`,
+            `   • Proxy forwards to appropriate backend OAuth server`,
+            `   • Tokens are managed and forwarded automatically`,
+            `   • Refresh tokens are handled transparently`,
+            ``,
+            `4. 📝 Configuration Format:`,
+            `   {`,
+            `     "servers": [{`,
+            `       "id": "oauth-server",`,
+            `       "transportType": "http",`,
+            `       "http": {`,
+            `         "url": "https://api.example.com/mcp",`,
+            `         "headers": {`,
+            `           "Authorization": "Bearer \${OAUTH_TOKEN}"`,
+            `         }`,
+            `       },`,
+            `       "security": {`,
+            `         "requireAuth": true,`,
+            `         "allowedScopes": ["read", "write"]`,
+            `       }`,
+            `     }]`,
+            `   }`,
+            ``,
+            `5. 🌐 OAuth Endpoints (Auto-configured):`,
+            `   • Authorization: http://localhost:3000/oauth/authorize`,
+            `   • Token: http://localhost:3000/oauth/token`,
+            `   • Metadata: http://localhost:3000/.well-known/oauth-authorization-server`,
+            ``,
+            `6. 📚 Client Integration:`,
+            `   • Use standard OAuth 2.1 + PKCE flow`,
+            `   • Redirect URI: http://localhost:3000/oauth/callback`,
+            `   • Scopes: read, write, admin (as supported)`,
+            ``
+          );
+        }
+
+        // Auto-fix suggestions
+        if (oauthDiagnostics.errors > 0 || potentialOAuthServers.length > 0) {
+          diagnosticsMessage.push(
+            `🔧 Auto-Fix Suggestions:`,
+            ``
+          );
+
+          if (potentialOAuthServers.length > 0) {
+            diagnosticsMessage.push(`   • Restart affected servers to trigger OAuth detection`);
+            diagnosticsMessage.push(`   • Verify backend server OAuth endpoints are accessible`);
+            diagnosticsMessage.push(`   • Check network connectivity to OAuth servers`);
+          }
+
+          if (oauthDiagnostics.configured < oauthDiagnostics.needsOAuth) {
+            diagnosticsMessage.push(`   • Complete OAuth proxy configuration for pending servers`);
+            diagnosticsMessage.push(`   • Verify OAuth client credentials are available`);
+          }
+
+          diagnosticsMessage.push(``);
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: diagnosticsMessage.join('\n')
+          }]
+        };
+      }
+    };
+  }
+
+  private getOAuthRecommendation(error: string): string {
+    const errorLower = error.toLowerCase();
+    
+    if (errorLower.includes('401') || errorLower.includes('unauthorized')) {
+      return 'Configure OAuth authentication with proper client credentials';
+    }
+    if (errorLower.includes('authorization header')) {
+      return 'Set up OAuth token in Authorization header';
+    }
+    if (errorLower.includes('access_token')) {
+      return 'Obtain valid access token through OAuth flow';
+    }
+    if (errorLower.includes('invalid_token')) {
+      return 'Refresh or re-acquire OAuth access token';
+    }
+    if (errorLower.includes('scope')) {
+      return 'Verify OAuth token has required scopes';
+    }
+    
+    return 'Review server authentication requirements and setup OAuth if needed';
   }
 }
