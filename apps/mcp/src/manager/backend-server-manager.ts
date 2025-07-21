@@ -10,7 +10,7 @@ import {
   AuthInfo,
 } from "../types.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { OAuthProxyManager } from "./oauth-proxy-manager.js";
+import { McpOAuthServerProvider } from "./mcp-oauth-server-provider.js";
 
 export interface BackendServerConnection {
   config: BackendServerConfig;
@@ -35,10 +35,10 @@ export class BackendServerManager {
   private failedServers: Map<string, FailedServerAttempt> = new Map();
   private reconnectIntervals: Map<string, NodeJS.Timeout> = new Map();
   private _initialized: Promise<void>;
-  private oauthManager: OAuthProxyManager;
+  private oauthProvider: McpOAuthServerProvider;
 
-  constructor(private serverConfigs: BackendServerConfig[]) {
-    this.oauthManager = new OAuthProxyManager();
+  constructor(private serverConfigs: BackendServerConfig[], oauthProvider?: McpOAuthServerProvider) {
+    this.oauthProvider = oauthProvider || new McpOAuthServerProvider();
     this._initialized = this.initializeServers();
   }
 
@@ -66,8 +66,13 @@ export class BackendServerManager {
   private async initializeServers() {
     console.error(`Initializing ${this.serverConfigs.length} backend servers...`);
     
-    // Force OAuth detection for GitHub servers before connecting
-    await this.oauthManager.forceOAuthDetection(this.serverConfigs);
+    // Register OAuth-enabled servers with the OAuth provider
+    for (const config of this.serverConfigs) {
+      if (config.enabled && this.needsOAuth(config)) {
+        console.error(`🔐 Registering OAuth server: ${config.id} (${config.name})`);
+        await this.oauthProvider.registerServer(config.id, config);
+      }
+    }
     
     for (const config of this.serverConfigs) {
       if (config.enabled) {
@@ -175,11 +180,10 @@ export class BackendServerManager {
       
       const errorMessage = error instanceof Error ? error.message : String(error);
       
-      // Check if this is an OAuth-related error
-      const needsOAuth = await this.oauthManager.detectOAuthRequirement(config.id, config, errorMessage);
-      
-      if (needsOAuth) {
-        console.error(`🔐 OAuth requirement detected for server ${config.id}`);
+      // Check if this is an OAuth-related error and register with OAuth provider
+      if (this.isOAuthError(errorMessage) && !this.oauthProvider.serverNeedsOAuth(config.id)) {
+        console.error(`🔐 OAuth requirement detected for server ${config.id}, registering with OAuth provider`);
+        await this.oauthProvider.registerServer(config.id, config);
       }
       
       // Track failed server attempt
@@ -454,30 +458,70 @@ export class BackendServerManager {
   }
 
   /**
-   * Get the OAuth proxy manager
+   * Get the OAuth provider
    */
-  getOAuthManager(): OAuthProxyManager {
-    return this.oauthManager;
+  getOAuthManager(): McpOAuthServerProvider {
+    return this.oauthProvider;
   }
 
   /**
    * Get servers that need OAuth authentication
    */
   getOAuthServers() {
-    return this.oauthManager.getOAuthServers();
+    return this.oauthProvider.getAllOAuthServers();
   }
 
   /**
    * Check if a server needs OAuth
    */
   serverNeedsOAuth(serverId: string): boolean {
-    return this.oauthManager.serverNeedsOAuth(serverId);
+    return this.oauthProvider.serverNeedsOAuth(serverId);
   }
 
   /**
-   * Get OAuth authorization URL for a server
+   * Check if a server configuration indicates OAuth requirement
    */
-  getOAuthAuthorizationUrl(serverId: string, redirectUri: string, scopes?: string[]): string | undefined {
-    return this.oauthManager.getAuthorizationUrl(serverId, redirectUri, scopes);
+  private needsOAuth(config: BackendServerConfig): boolean {
+    // GitHub MCP server always needs OAuth
+    if (this.isGitHubMcpServer(config)) {
+      return true;
+    }
+    
+    // Check if server explicitly declares OAuth requirement
+    return config.security?.requireAuth === true;
+  }
+
+  /**
+   * Check if this is the GitHub MCP server
+   */
+  private isGitHubMcpServer(config: BackendServerConfig): boolean {
+    const baseUrl = config.http?.url || config.sse?.url || '';
+    return baseUrl.includes('githubcopilot.com') || 
+           baseUrl.includes('github.com') ||
+           config.id === 'github' ||
+           config.name?.toLowerCase().includes('github');
+  }
+
+  /**
+   * Check if an error indicates OAuth is needed
+   */
+  private isOAuthError(error?: string): boolean {
+    if (!error) return false;
+    
+    const oauthIndicators = [
+      'authorization',
+      'unauthorized',
+      '401',
+      'access_token',
+      'oauth',
+      'bearer',
+      'authentication required',
+      'missing required authorization header',
+      'invalid_token',
+      'token_expired'
+    ];
+    
+    const errorLower = error.toLowerCase();
+    return oauthIndicators.some(indicator => errorLower.includes(indicator));
   }
 }

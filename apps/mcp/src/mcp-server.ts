@@ -14,6 +14,7 @@ import {
   McpError,
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
+import { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import {
   ToolsetConfig,
   DynamicToolDiscoveryOptions,
@@ -29,6 +30,7 @@ export class McpServer {
   private readonly toolManager: ToolManager;
   private readonly resourceManager: ResourceManager;
   private readonly promptManager: PromptManager;
+  private oauthProvider?: OAuthServerProvider;
 
   constructor({
     name,
@@ -37,6 +39,7 @@ export class McpServer {
     toolsetConfig,
     dynamicToolDiscovery,
     instructions,
+    oauthProvider,
   }: {
     name: string;
     version: string;
@@ -44,8 +47,10 @@ export class McpServer {
     toolsetConfig: ToolsetConfig;
     dynamicToolDiscovery?: DynamicToolDiscoveryOptions;
     instructions?: string;
+    oauthProvider?: OAuthServerProvider;
   }) {
     this.toolsetConfig = toolsetConfig;
+    this.oauthProvider = oauthProvider;
     this.toolManager = new ToolManager(
       name,
       capabilities?.tools || [],
@@ -69,6 +74,18 @@ export class McpServer {
     const serverCapabilities: any = {
       logging: {},
     };
+    
+    // Add OAuth capabilities if OAuth provider is available
+    if (oauthProvider) {
+      serverCapabilities.authorization = {
+        oauth2: {
+          scopes_supported: ['read', 'write', 'admin'],
+          grant_types_supported: ['authorization_code', 'refresh_token'],
+          response_types_supported: ['code'],
+          token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post']
+        }
+      };
+    }
     
     if (hasTools) {
       serverCapabilities.tools = {
@@ -232,5 +249,9 @@ export class McpServer {
   }
   get server() {
     return this._server;
+  }
+
+  get oauth() {
+    return this.oauthProvider;
   }
 }

@@ -4,6 +4,7 @@ import { BackendServerManager } from "./backend-server-manager.js";
 import { ProxyToolManager } from "./proxy-tool-manager.js";
 import { ConfigurationManager } from "./configuration-manager.js";
 import { DynamicServerCreator } from "./dynamic-server-creator.js";
+import { McpOAuthServerProvider } from "./mcp-oauth-server-provider.js";
 import {
   ToolsetConfig,
   DynamicToolDiscoveryOptions,
@@ -20,6 +21,7 @@ export class ProxyMcpServer extends McpServer {
   private proxyToolManager: ProxyToolManager;
   private dynamicServerCreator: DynamicServerCreator;
   private devToolManager?: DevToolManager;
+  private mcpOAuthProvider: McpOAuthServerProvider;
 
   // Static factory method for async initialization
   static async create({
@@ -43,8 +45,11 @@ export class ProxyMcpServer extends McpServer {
 
     console.error("🚀 Starting MCP Proxy Server initialization...");
 
+    // Initialize OAuth provider first
+    const mcpOAuthProvider = new McpOAuthServerProvider();
+
     // Initialize backend server manager and wait for all connections
-    const backendServerManager = new BackendServerManager(proxyConfig.servers);
+    const backendServerManager = new BackendServerManager(proxyConfig.servers, mcpOAuthProvider);
     console.error("⏳ Waiting for all backend servers to connect...");
     await backendServerManager.waitForInitialization();
     console.error("✅ All backend servers initialized");
@@ -73,11 +78,13 @@ export class ProxyMcpServer extends McpServer {
         toolsetConfig,
         dynamicToolDiscovery,
         instructions,
+        oauthProvider: mcpOAuthProvider,
       },
       configMgr,
       backendServerManager,
       proxyToolManager,
-      dynamicServerCreator
+      dynamicServerCreator,
+      mcpOAuthProvider
     );
 
     console.error("🎯 MCP Proxy Server ready to accept requests!");
@@ -91,17 +98,20 @@ export class ProxyMcpServer extends McpServer {
       toolsetConfig,
       dynamicToolDiscovery,
       instructions,
+      oauthProvider,
     }: {
       name: string;
       version: string;
       toolsetConfig: ToolsetConfig;
       dynamicToolDiscovery?: DynamicToolDiscoveryOptions;
       instructions?: string;
+      oauthProvider?: any;
     },
     configMgr: ConfigurationManager,
     backendServerManager: BackendServerManager,
     proxyToolManager: ProxyToolManager,
-    dynamicServerCreator: DynamicServerCreator
+    dynamicServerCreator: DynamicServerCreator,
+    mcpOAuthProvider: McpOAuthServerProvider
   ) {
 
     // Create server management tools
@@ -210,6 +220,7 @@ ${instructions || ""}`;
       toolsetConfig,
       dynamicToolDiscovery,
       instructions: proxyInstructions,
+      oauthProvider,
     });
 
     this.configurationManager = configMgr;
@@ -217,6 +228,7 @@ ${instructions || ""}`;
     this.proxyToolManager = proxyToolManager;
     this.dynamicServerCreator = dynamicServerCreator;
     this.devToolManager = devToolManager;
+    this.mcpOAuthProvider = mcpOAuthProvider;
 
     // Override the parent's toolManager with our proxyToolManager
     // @ts-ignore - accessing private field
@@ -809,5 +821,9 @@ ${instructions || ""}`;
 
   get serverCreator() {
     return this.dynamicServerCreator;
+  }
+
+  get oauthProvider() {
+    return this.mcpOAuthProvider;
   }
 }
