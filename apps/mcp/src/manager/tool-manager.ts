@@ -1,3 +1,12 @@
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
 // ToolManager handles tool logic for McpServer
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -165,7 +174,7 @@ export class ToolManager {
           },
         },
         handler: async (params, req, opts) => {
-          console.error(
+          debugLog(
             `Dynamic tool trigger called with params: ${JSON.stringify(
               params,
               null,
@@ -190,7 +199,7 @@ export class ToolManager {
                 `Unknown tool: ${name}`
               );
             }
-            console.error(
+            debugLog(
               `Dynamic tool trigger: ${trigger} ${name} (${internal})`
             );
             if (trigger === "enable") {
@@ -248,7 +257,7 @@ export class ToolManager {
       extra: {}
     };
     
-    console.error(
+    debugLog(
       `Checking if tool ${name} is enabled for ${clientId}. result: ${
         this.enabledTools.has(name) ? "enabled" : "not enabled"
       } and canBeEnabled: ${
@@ -297,7 +306,7 @@ export class ToolManager {
         .map(([_, v]) => {
           // Validate inputSchema before processing
           if (!v.definition.inputSchema) {
-            console.error(`Tool ${v.definition.name} has no inputSchema, using empty object schema`);
+            debugLog(`Tool ${v.definition.name} has no inputSchema, using empty object schema`);
             return {
               ...v.definition,
               inputSchema: {
@@ -345,7 +354,7 @@ export class ToolManager {
                   },
                 };
           } catch (error) {
-            console.error(`Error processing tool ${v.definition.name}:`, error);
+            debugLog(`Error processing tool ${v.definition.name}:`, error);
             return {
               ...v.definition,
               inputSchema: {
@@ -453,7 +462,7 @@ export class ToolManager {
       };
       return await toolCapability.handler(validatedData, reqWithDefaults, opts);
     } catch (err) {
-      console.error("Tool handler error:", err);
+      debugLog("Tool handler error:", err);
       if (err instanceof McpError) {
         throw err;
       }

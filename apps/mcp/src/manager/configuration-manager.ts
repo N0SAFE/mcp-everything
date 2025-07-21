@@ -3,6 +3,16 @@ import * as fs from "fs";
 import * as path from "path";
 import { BackendServerConfig, ProxyServerConfig } from "../types.js";
 
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
+
 export class ConfigurationManager {
   private config: ProxyServerConfig;
   private configPath: string;
@@ -19,12 +29,12 @@ export class ConfigurationManager {
         const parsed = JSON.parse(configData);
         return this.validateAndNormalizeConfig(parsed);
       } else {
-        console.error(`Configuration file not found at ${this.configPath}, using default configuration`);
+        debugLog(`Configuration file not found at ${this.configPath}, using default configuration`);
         return this.getDefaultConfiguration();
       }
     } catch (error) {
-      console.error(`Error loading configuration from ${this.configPath}:`, error);
-      console.error("Using default configuration");
+      debugLog(`Error loading configuration from ${this.configPath}:`, error);
+      debugLog("Using default configuration");
       return this.getDefaultConfiguration();
     }
   }
@@ -163,9 +173,9 @@ export class ConfigurationManager {
       }
 
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
-      console.error(`Configuration saved to ${this.configPath}`);
+      debugLog(`Configuration saved to ${this.configPath}`);
     } catch (error) {
-      console.error(`Error saving configuration to ${this.configPath}:`, error);
+      debugLog(`Error saving configuration to ${this.configPath}:`, error);
       throw error;
     }
   }
@@ -355,6 +365,6 @@ export class ConfigurationManager {
     }
 
     fs.writeFileSync(filePath, JSON.stringify(exampleConfig, null, 2));
-    console.error(`Example configuration generated at ${filePath}`);
+    debugLog(`Example configuration generated at ${filePath}`);
   }
 }

@@ -20,6 +20,16 @@ import {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { BackendServerConfig } from "../types.js";
 
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
+
 export interface ConsolidatedOAuthRequirement {
   serverId: string;
   config: BackendServerConfig;
@@ -113,14 +123,14 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     };
 
     await this._clientsStore.storeClient(defaultClient);
-    console.error(`🔐 Initialized consolidated OAuth client: ${defaultClient.client_id}`);
+    debugLog(`🔐 Initialized consolidated OAuth client: ${defaultClient.client_id}`);
   }
 
   /**
    * Register an OAuth requirement from a backend server
    */
   async registerOAuthRequirement(serverId: string, config: BackendServerConfig, error?: string): Promise<boolean> {
-    console.error(`🔐 Registering OAuth requirement for server: ${serverId} (${config.name})`);
+    debugLog(`🔐 Registering OAuth requirement for server: ${serverId} (${config.name})`);
 
     const scopes = this.determineRequiredScopes(config, error);
     const urls = this.buildOAuthUrls(config);
@@ -140,7 +150,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     };
 
     this.oauthRequirements.set(serverId, requirement);
-    console.error(`✅ OAuth requirement registered for ${serverId}: scopes=${scopes.join(', ')}`);
+    debugLog(`✅ OAuth requirement registered for ${serverId}: scopes=${scopes.join(', ')}`);
     return true;
   }
 
@@ -168,14 +178,14 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
    * Force OAuth detection for known OAuth-enabled servers
    */
   async forceOAuthDetection(serverConfigs: BackendServerConfig[]): Promise<void> {
-    console.error("🔍 Force detecting OAuth requirements for all servers...");
+    debugLog("🔍 Force detecting OAuth requirements for all servers...");
 
     for (const config of serverConfigs) {
       if (!config.enabled) continue;
 
       // Force OAuth for known OAuth-enabled servers
       if (this.isKnownOAuthServer(config)) {
-        console.error(`🔐 Force enabling OAuth for known server: ${config.id}`);
+        debugLog(`🔐 Force enabling OAuth for known server: ${config.id}`);
         await this.registerOAuthRequirement(
           config.id, 
           config, 
@@ -361,7 +371,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
   // Implementation of OAuthServerProvider interface
 
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
-    console.error(`🔐 Starting consolidated OAuth authorization for client: ${client.client_id}`);
+    debugLog(`🔐 Starting consolidated OAuth authorization for client: ${client.client_id}`);
     
     // Store the code challenge for later verification
     if (params.codeChallenge) {
@@ -381,7 +391,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
       authUrl.searchParams.set('code_challenge_method', 'S256'); // Default to S256
     }
 
-    console.error(`🔐 Redirecting to consolidated OAuth: ${authUrl.toString()}`);
+    debugLog(`🔐 Redirecting to consolidated OAuth: ${authUrl.toString()}`);
     res.redirect(authUrl.toString());
   }
 
@@ -402,7 +412,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     redirectUri?: string,
     resource?: URL
   ): Promise<OAuthTokens> {
-    console.error(`🔐 Exchanging consolidated authorization code for tokens`);
+    debugLog(`🔐 Exchanging consolidated authorization code for tokens`);
 
     // In a real implementation, this would exchange the consolidated auth code
     // for tokens from all backend servers. For now, we'll create a master token.
@@ -422,7 +432,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
         );
         serverTokens.push(backendTokens);
       } catch (error) {
-        console.error(`❌ Failed to exchange tokens with ${requirement.serverId}:`, error);
+        debugLog(`❌ Failed to exchange tokens with ${requirement.serverId}:`, error);
         // Continue with other servers even if one fails
       }
     }
@@ -448,7 +458,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     codeVerifier?: string,
     redirectUri?: string
   ): Promise<ConsolidatedToken> {
-    console.error(`🔗 Exchanging tokens with backend server: ${requirement.serverId}`);
+    debugLog(`🔗 Exchanging tokens with backend server: ${requirement.serverId}`);
 
     if (this.isGitHubMcpServer(requirement.config)) {
       return await this.exchangeGitHubTokens(requirement, authorizationCode, redirectUri);
@@ -540,7 +550,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     scopes?: string[],
     resource?: URL
   ): Promise<OAuthTokens> {
-    console.error(`🔄 Refreshing consolidated tokens for client: ${client.client_id}`);
+    debugLog(`🔄 Refreshing consolidated tokens for client: ${client.client_id}`);
 
     // Refresh tokens with all backend servers
     const serverTokens = this.activeTokens.get(client.client_id) || [];
@@ -555,7 +565,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
             refreshedTokens.push(refreshed);
           }
         } catch (error) {
-          console.error(`❌ Failed to refresh token for ${serverToken.serverId}:`, error);
+          debugLog(`❌ Failed to refresh token for ${serverToken.serverId}:`, error);
           // Keep the original token if refresh fails
           refreshedTokens.push(serverToken);
         }
@@ -622,7 +632,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    console.error(`🔍 Verifying consolidated access token`);
+    debugLog(`🔍 Verifying consolidated access token`);
 
     // Find the client that has this token
     for (const [clientId, serverTokens] of this.activeTokens.entries()) {
@@ -647,7 +657,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
   }
 
   async revokeToken(client: OAuthClientInformationFull, request: OAuthTokenRevocationRequest): Promise<void> {
-    console.error(`🗑️ Revoking consolidated tokens for client: ${client.client_id}`);
+    debugLog(`🗑️ Revoking consolidated tokens for client: ${client.client_id}`);
 
     // Revoke tokens with all backend servers
     const serverTokens = this.activeTokens.get(client.client_id) || [];
@@ -659,7 +669,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
           await this.revokeBackendToken(requirement, serverToken);
         }
       } catch (error) {
-        console.error(`❌ Failed to revoke token for ${serverToken.serverId}:`, error);
+        debugLog(`❌ Failed to revoke token for ${serverToken.serverId}:`, error);
         // Continue revoking other tokens even if one fails
       }
     }

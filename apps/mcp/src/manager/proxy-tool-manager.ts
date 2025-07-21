@@ -10,6 +10,16 @@ import {
   DynamicToolDiscoveryOptions,
 } from "../types.js";
 import { createTool, createToolDefinition } from "../utils/tools.js";
+
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
 import { z } from "zod";
 
 export class ProxyToolManager extends ToolManager {
@@ -265,23 +275,23 @@ export class ProxyToolManager extends ToolManager {
   hasTools() {return true}
 
   private async loadProxyToolsFromServers() {
-    console.error("Loading proxy tools from servers...");
+    debugLog("Loading proxy tools from servers...");
     const connections = this.backendServerManager.getConnectedServers();
-    console.error(`Found ${connections.length} connected servers`);
+    debugLog(`Found ${connections.length} connected servers`);
     const proxyTools: ToolCapability[] = [];
 
     for (const connection of connections) {
-      console.error(`Loading tools from server: ${connection.config.id} (${connection.tools.size} tools)`);
+      debugLog(`Loading tools from server: ${connection.config.id} (${connection.tools.size} tools)`);
       for (const [toolName, tool] of connection.tools) {
         // Create proxy tool
         const proxyToolName = `${connection.config.id}__${toolName}`;
         const proxyTool = this.createProxyTool(connection.config.id, tool, proxyToolName);
         proxyTools.push(proxyTool);
-        console.error(`Created proxy tool: ${proxyToolName}`);
+        debugLog(`Created proxy tool: ${proxyToolName}`);
       }
     }
 
-    console.error(`Total proxy tools created: ${proxyTools.length}`);
+    debugLog(`Total proxy tools created: ${proxyTools.length}`);
 
     // Add proxy tools to the manager
     for (const proxyTool of proxyTools) {
@@ -291,12 +301,12 @@ export class ProxyToolManager extends ToolManager {
       if (this.toolsetConfig.mode === "readWrite" || 
           (proxyTool.definition.annotations?.readOnlyHint !== false)) {
         this.enabledTools.add(proxyTool.definition.name);
-        console.error(`Enabled proxy tool: ${proxyTool.definition.name}`);
+        debugLog(`Enabled proxy tool: ${proxyTool.definition.name}`);
       }
     }
     
-    console.error(`Total tools in manager: ${this.tools.size}`);
-    console.error(`Total enabled tools: ${this.enabledTools.size}`);
+    debugLog(`Total tools in manager: ${this.tools.size}`);
+    debugLog(`Total enabled tools: ${this.enabledTools.size}`);
   }
 
   private createProxyTool(
@@ -327,7 +337,7 @@ export class ProxyToolManager extends ToolManager {
         );
         return result;
       } catch (error) {
-        console.error(`Error calling tool ${originalTool.name} on server ${serverId}:`, error);
+        debugLog(`Error calling tool ${originalTool.name} on server ${serverId}:`, error);
         return {
           content: [
             {

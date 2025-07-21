@@ -12,6 +12,16 @@ import {
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { OAuthConsolidationManager } from "./oauth-consolidation-manager.js";
 
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
+
 export interface BackendServerConnection {
   config: BackendServerConfig;
   client: Client;
@@ -63,26 +73,23 @@ export class BackendServerManager {
     await this._initialized;
   }
 
-  private async initializeServers() {
-    console.error(`Initializing ${this.serverConfigs.length} backend servers...`);
-    
-    // Register OAuth-enabled servers with the OAuth consolidation manager
-    for (const config of this.serverConfigs) {
-      if (config.enabled && this.needsOAuth(config)) {
-        console.error(`🔐 Registering OAuth server: ${config.id} (${config.name})`);
-        await this.oauthConsolidationManager.registerOAuthRequirement(config.id, config);
-      }
-    }
-    
+  private async initializeServers(): Promise<void> {
+    debugLog(`Initializing ${this.serverConfigs.length} backend servers...`);
+
+    // Register OAuth servers first
     for (const config of this.serverConfigs) {
       if (config.enabled) {
-        console.error(`Connecting to server: ${config.id} (${config.name})`);
+        debugLog(`🔐 Registering OAuth server: ${config.id} (${config.name})`);
+        await this.oauthConsolidationManager.registerOAuthRequirement(config.id, config);
+      }
+      if (config.enabled) {
+        debugLog(`Connecting to server: ${config.id} (${config.name})`);
         await this.connectToServer(config);
       } else {
-        console.error(`Skipping disabled server: ${config.id} (${config.name})`);
+        debugLog(`Skipping disabled server: ${config.id} (${config.name})`);
       }
     }
-    console.error(`Backend server initialization complete. ${this.connections.size} servers connected.`);
+    debugLog(`Backend server initialization complete. ${this.connections.size} servers connected.`);
   }
 
   async connectToServer(config: BackendServerConfig): Promise<void> {
@@ -110,6 +117,8 @@ export class BackendServerManager {
             command: config.stdio.command,
             args: config.stdio.args || [],
             env: config.stdio.env,
+            // Suppress stderr output when not in debug mode
+            stderr: DEBUG_ENABLED ? "inherit" : "ignore",
           });
           break;
         case "http":
@@ -135,7 +144,7 @@ export class BackendServerManager {
           throw new Error(`Unsupported transport type: ${config.transportType}`);
       }
 
-      console.error(`🔗 Attempting to connect to server: ${config.name} (${config.id})`);
+      debugLog(`🔗 Attempting to connect to server: ${config.name} (${config.id})`);
       
       // Add timeout to connection attempt to prevent hanging
       const connectPromise = client.connect(transport);
@@ -145,9 +154,9 @@ export class BackendServerManager {
         }, 30000);
       });
       
-      console.error(`⏳ Waiting for server ${config.id} to respond to initialize request...`);
+      debugLog(`⏳ Waiting for server ${config.id} to respond to initialize request...`);
       await Promise.race([connectPromise, timeoutPromise]);
-      console.error(`✅ Server ${config.id} responded to initialize request successfully`);
+      debugLog(`✅ Server ${config.id} responded to initialize request successfully`);
 
       const connection: BackendServerConnection = {
         config,
@@ -174,15 +183,15 @@ export class BackendServerManager {
       // Remove from failed servers if it was there
       this.failedServers.delete(config.id);
       
-      console.error(`Connected to backend server: ${config.name} (${config.id})`);
+      debugLog(`Connected to backend server: ${config.name} (${config.id})`);
     } catch (error) {
-      console.error(`Failed to connect to server ${config.id}:`, error);
+      debugLog(`Failed to connect to server ${config.id}:`, error);
       
       const errorMessage = error instanceof Error ? error.message : String(error);
       
       // Check if this is an OAuth-related error and register with OAuth consolidation manager
       if (this.isOAuthError(errorMessage)) {
-        console.error(`🔐 OAuth requirement detected for server ${config.id}, registering with OAuth consolidation manager`);
+        debugLog(`🔐 OAuth requirement detected for server ${config.id}, registering with OAuth consolidation manager`);
         await this.oauthConsolidationManager.detectOAuthFromError(config.id, config, errorMessage);
       }
       
@@ -217,7 +226,7 @@ export class BackendServerManager {
 
   private async loadServerCapabilities(connection: BackendServerConnection) {
     try {
-      console.error(`Loading capabilities for server: ${connection.config.id}`);
+      debugLog(`Loading capabilities for server: ${connection.config.id}`);
       
       // Load tools
       const toolsResult = await connection.client.listTools();
@@ -227,9 +236,9 @@ export class BackendServerManager {
           connection.tools.set(tool.name, tool);
         }
         connection.status.toolsCount = toolsResult.tools.length;
-        console.error(`Loaded ${toolsResult.tools.length} tools for server ${connection.config.id}: ${toolsResult.tools.map(t => t.name).join(', ')}`);
+        debugLog(`Loaded ${toolsResult.tools.length} tools for server ${connection.config.id}: ${toolsResult.tools.map(t => t.name).join(', ')}`);
       } else {
-        console.error(`No tools found for server ${connection.config.id}`);
+        debugLog(`No tools found for server ${connection.config.id}`);
       }
 
       // Load resources
@@ -241,7 +250,7 @@ export class BackendServerManager {
             connection.resources.set(resource.uri, resource);
           }
           connection.status.resourcesCount = resourcesResult.resources.length;
-          console.error(`Loaded ${resourcesResult.resources.length} resources for server ${connection.config.id}`);
+          debugLog(`Loaded ${resourcesResult.resources.length} resources for server ${connection.config.id}`);
         }
       } catch (error) {
         // Resources not supported
@@ -261,7 +270,7 @@ export class BackendServerManager {
         // Prompts not supported
       }
     } catch (error) {
-      console.error(`Failed to load capabilities for server ${connection.config.id}:`, error);
+      debugLog(`Failed to load capabilities for server ${connection.config.id}:`, error);
     }
   }
 
@@ -289,7 +298,7 @@ export class BackendServerManager {
       try {
         await connection.client.close();
       } catch (error) {
-        console.error(`Error closing connection to ${serverId}:`, error);
+        debugLog(`Error closing connection to ${serverId}:`, error);
       }
       this.connections.delete(serverId);
     }
@@ -367,7 +376,7 @@ export class BackendServerManager {
     try {
       return await connection.client.callTool({ name: toolName, arguments: args });
     } catch (error) {
-      console.error(`Error calling tool ${toolName} on server ${serverId}:`, error);
+      debugLog(`Error calling tool ${toolName} on server ${serverId}:`, error);
       throw error;
     }
   }

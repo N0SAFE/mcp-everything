@@ -1,3 +1,12 @@
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
 // McpServer main class split from index.ts
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
@@ -212,7 +221,7 @@ export class McpServer {
       );
     }
     // Error handling
-    this._server.onerror = (error) => console.error("[MCP Error]", error);
+    this._server.onerror = (error) => debugLog("[MCP Error]", error);
     process.on("SIGINT", async () => {
       await this.shutdown();
     });
@@ -241,9 +250,9 @@ export class McpServer {
       }
       
       await this._server.close();
-      console.error("MCP Server shut down gracefully");
+      debugLog("MCP Server shut down gracefully");
     } catch (error) {
-      console.error("Error during shutdown:", error);
+      debugLog("Error during shutdown:", error);
     }
     process.exit(0);
   }

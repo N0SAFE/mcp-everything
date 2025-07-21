@@ -5,6 +5,16 @@ import { ConfigurationManager } from "../manager/configuration-manager.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getConfigFromCommanderAndEnv } from "./config.js";
 
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
+
 async function main() {
   try {
     // Load configuration
@@ -12,17 +22,17 @@ async function main() {
     
     if (process.env.MCP_PROXY_USE_ENV === "true") {
       configManager = ConfigurationManager.createFromEnvironment();
-      console.error("Using configuration from environment variables");
+      debugLog("Using configuration from environment variables");
     } else {
       configManager = new ConfigurationManager(process.env.MCP_PROXY_CONFIG_PATH);
-      console.error(`Using configuration from file: ${process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"}`);
+      debugLog(`Using configuration from file: ${process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"}`);
     }
 
     // Get toolset configuration from command line/environment
     const toolsetConfig = getConfigFromCommanderAndEnv();
 
     // Create proxy server with async initialization
-    console.error("🚀 Initializing MCP Proxy Server...");
+    debugLog("🚀 Initializing MCP Proxy Server...");
     const server = await ProxyMcpServer.create({
       name: "mcp-proxy-server",
       version: "1.0.0",
@@ -94,14 +104,19 @@ proxy_create_custom_server({
     const transport = new StdioServerTransport();
     await server.server.connect(transport);
     
+    // Notify the client that tools, resources, and prompts are available after initialization
+    server.server.sendToolListChanged();
+    server.server.sendResourceListChanged();
+    server.server.sendPromptListChanged();
+    
     server.server.sendLoggingMessage({
       level: "info",
       data: "MCP Proxy Server started successfully",
     });
 
-    console.error("MCP Proxy Server running on stdio");
-    console.error(`Configured servers: ${configManager.getServers().length}`);
-    console.error(`Active servers: ${server.backend.getConnectedServers().length}`);
+    debugLog("MCP Proxy Server running on stdio");
+    debugLog(`Configured servers: ${configManager.getServers().length}`);
+    debugLog(`Active servers: ${server.backend.getConnectedServers().length}`);
 
   } catch (error) {
     console.error("Failed to start MCP Proxy Server:", error);
@@ -111,12 +126,12 @@ proxy_create_custom_server({
 
 // Handle graceful shutdown
 process.on("SIGINT", () => {
-  console.error("Received SIGINT, shutting down gracefully...");
+  debugLog("Received SIGINT, shutting down gracefully...");
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  console.error("Received SIGTERM, shutting down gracefully...");
+  debugLog("Received SIGTERM, shutting down gracefully...");
   process.exit(0);
 });
 

@@ -1,3 +1,12 @@
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
 /**
  * MCP OAuth Server Provider - Implements OAuth for MCP servers according to specification
  * https://modelcontextprotocol.io/specification/draft/basic/authorization
@@ -68,7 +77,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
    * Register an OAuth-enabled backend server
    */
   async registerServer(serverId: string, config: BackendServerConfig): Promise<void> {
-    console.error(`🔐 Registering OAuth server: ${serverId} (${config.name})`);
+    debugLog(`🔐 Registering OAuth server: ${serverId} (${config.name})`);
     
     // Create a dedicated client store for this server
     const clientStore = new InMemoryClientStore();
@@ -100,7 +109,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
     };
     
     this.oauthServers.set(serverId, serverInfo);
-    console.error(`✅ OAuth server registered: ${serverId}`);
+    debugLog(`✅ OAuth server registered: ${serverId}`);
   }
 
   /**
