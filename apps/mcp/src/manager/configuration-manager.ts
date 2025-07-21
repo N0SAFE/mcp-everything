@@ -3,30 +3,55 @@ import * as fs from "fs";
 import * as path from "path";
 import { BackendServerConfig, ProxyServerConfig } from "../types.js";
 
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
+
 export class ConfigurationManager {
   private config: ProxyServerConfig;
   private configPath: string;
 
   constructor(configPath?: string) {
-    this.configPath = configPath || process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json";
+    this.configPath = configPath || process.env.MCP_PROXY_CONFIG_PATH || path.resolve(__dirname, "../../mcp-proxy-config.json");
+    console.error(`DEBUG: Configuration path: ${this.configPath}`);
+    console.error(`DEBUG: Current working directory: ${process.cwd()}`);
+    console.error(`DEBUG: File exists: ${fs.existsSync(this.configPath)}`);
     this.config = this.loadConfiguration();
+    console.error(`DEBUG: Loaded ${this.config.servers?.length || 0} servers`);
   }
 
   private loadConfiguration(): ProxyServerConfig {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        const configData = fs.readFileSync(this.configPath, "utf-8");
-        const parsed = JSON.parse(configData);
-        return this.validateAndNormalizeConfig(parsed);
-      } else {
-        console.error(`Configuration file not found at ${this.configPath}, using default configuration`);
-        return this.getDefaultConfiguration();
+    const possiblePaths = [
+      this.configPath,
+      path.resolve(__dirname, "../../mcp-proxy-config-enhanced-mimicked.json"),
+      path.resolve(__dirname, "../../mcp-proxy-config.json"),
+      "./mcp-proxy-config.json"
+    ];
+
+    for (const configPath of possiblePaths) {
+      try {
+        if (fs.existsSync(configPath)) {
+          console.error(`DEBUG: Trying config path: ${configPath}`);
+          const configData = fs.readFileSync(configPath, "utf-8");
+          const parsed = JSON.parse(configData);
+          const validated = this.validateAndNormalizeConfig(parsed);
+          console.error(`DEBUG: Successfully loaded ${validated.servers.length} servers from ${configPath}`);
+          return validated;
+        }
+      } catch (error) {
+        console.error(`DEBUG: Error loading configuration from ${configPath}:`, error);
+        continue;
       }
-    } catch (error) {
-      console.error(`Error loading configuration from ${this.configPath}:`, error);
-      console.error("Using default configuration");
-      return this.getDefaultConfiguration();
     }
+    
+    console.error(`DEBUG: No configuration file found, using default configuration`);
+    return this.getDefaultConfiguration();
   }
 
   private validateAndNormalizeConfig(config: any): ProxyServerConfig {
@@ -163,9 +188,9 @@ export class ConfigurationManager {
       }
 
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
-      console.error(`Configuration saved to ${this.configPath}`);
+      debugLog(`Configuration saved to ${this.configPath}`);
     } catch (error) {
-      console.error(`Error saving configuration to ${this.configPath}:`, error);
+      debugLog(`Error saving configuration to ${this.configPath}:`, error);
       throw error;
     }
   }
@@ -355,6 +380,6 @@ export class ConfigurationManager {
     }
 
     fs.writeFileSync(filePath, JSON.stringify(exampleConfig, null, 2));
-    console.error(`Example configuration generated at ${filePath}`);
+    debugLog(`Example configuration generated at ${filePath}`);
   }
 }

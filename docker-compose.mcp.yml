@@ -29,6 +29,7 @@ services:
     environment:
       - NODE_ENV=development
       - MCP_PROXY_CONFIG_PATH=./mcp-proxy-config.json
+      - MCP_DEV_MODE=true
       # MCP Inspector Configuration
       - CLIENT_PORT=3001
       - SERVER_PORT=3002

@@ -14,6 +14,7 @@ import {
   McpError,
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
+import { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import {
   ToolsetConfig,
   DynamicToolDiscoveryOptions,
@@ -22,6 +23,7 @@ import {
 import { ToolManager } from "./manager/tool-manager";
 import { ResourceManager } from "./manager/resource-manager";
 import { PromptManager } from "./manager/prompt-manager";
+import { Logger } from "./utils/logging.js";
 
 export class McpServer {
   protected readonly _server: Server;
@@ -29,6 +31,7 @@ export class McpServer {
   private readonly toolManager: ToolManager;
   private readonly resourceManager: ResourceManager;
   private readonly promptManager: PromptManager;
+  oauthProvider?: OAuthServerProvider;
 
   constructor({
     name,
@@ -37,6 +40,8 @@ export class McpServer {
     toolsetConfig,
     dynamicToolDiscovery,
     instructions,
+    oauthProvider,
+    managers = {},
   }: {
     name: string;
     version: string;
@@ -44,22 +49,29 @@ export class McpServer {
     toolsetConfig: ToolsetConfig;
     dynamicToolDiscovery?: DynamicToolDiscoveryOptions;
     instructions?: string;
+    oauthProvider?: OAuthServerProvider;
+    managers?: {
+      toolManager?: ToolManager;
+      resourceManager?: ResourceManager;
+      promptManager?: PromptManager;
+    };
   }) {
     this.toolsetConfig = toolsetConfig;
-    this.toolManager = new ToolManager(
-      name,
-      capabilities?.tools || [],
-      toolsetConfig,
-      dynamicToolDiscovery
-    );
+    this.oauthProvider = oauthProvider;
     // Ensure resources and prompts are always valid objects
     const resources = capabilities?.resources ?? {
       definitions: {},
       handlers: {},
     };
     const prompts = capabilities?.prompts ?? { definitions: {}, handlers: {} };
-    this.resourceManager = new ResourceManager(resources);
-    this.promptManager = new PromptManager(prompts);
+    this.toolManager = managers.toolManager || new ToolManager(
+      name,
+      capabilities?.tools || [],
+      toolsetConfig,
+      dynamicToolDiscovery
+    );
+    this.resourceManager = managers.resourceManager || new ResourceManager(resources);
+    this.promptManager = managers.promptManager || new PromptManager(prompts);
     // Determine capabilities for the MCP server
     const hasTools = this.toolManager.hasTools();
     const hasResources = this.resourceManager.hasResources();
@@ -69,6 +81,18 @@ export class McpServer {
     const serverCapabilities: any = {
       logging: {},
     };
+    
+    // Add OAuth capabilities if OAuth provider is available
+    if (oauthProvider) {
+      serverCapabilities.authorization = {
+        oauth2: {
+          scopes_supported: ['read', 'write', 'admin'],
+          grant_types_supported: ['authorization_code', 'refresh_token'],
+          response_types_supported: ['code'],
+          token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post']
+        }
+      };
+    }
     
     if (hasTools) {
       serverCapabilities.tools = {
@@ -195,7 +219,7 @@ export class McpServer {
       );
     }
     // Error handling
-    this._server.onerror = (error) => console.error("[MCP Error]", error);
+    this._server.onerror = (error) => Logger.logError(error instanceof Error ? error : String(error), "[MCP Error]", { component: "mcp-server" });
     process.on("SIGINT", async () => {
       await this.shutdown();
     });
@@ -224,13 +248,17 @@ export class McpServer {
       }
       
       await this._server.close();
-      console.error("MCP Server shut down gracefully");
+      Logger.info("MCP Server shut down gracefully", { component: "mcp-server" });
     } catch (error) {
-      console.error("Error during shutdown:", error);
+      Logger.logError(error instanceof Error ? error : String(error), "Error during shutdown", { component: "mcp-server" });
     }
     process.exit(0);
   }
   get server() {
     return this._server;
+  }
+
+  get oauth() {
+    return this.oauthProvider;
   }
 }

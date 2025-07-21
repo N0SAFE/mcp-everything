@@ -1,5 +1,10 @@
 // BackendServerManager handles connections to multiple MCP servers as clients
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+// Component name for logging
+function getComponentName() {
+  return "backend-server-manager";
+}
+
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -10,6 +15,9 @@ import {
   AuthInfo,
 } from "../types.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { OAuthConsolidationManager } from "./oauth-consolidation-manager.js";
+import { Logger } from "../utils/logging.js";
+import Stream from "stream";
 
 export interface BackendServerConnection {
   config: BackendServerConfig;
@@ -21,12 +29,23 @@ export interface BackendServerConnection {
   prompts: Map<string, any>;
 }
 
+export interface FailedServerAttempt {
+  config: BackendServerConfig;
+  status: BackendServerStatus;
+  attemptCount: number;
+  firstFailure: Date;
+  lastAttempt: Date;
+}
+
 export class BackendServerManager {
   private connections: Map<string, BackendServerConnection> = new Map();
+  private failedServers: Map<string, FailedServerAttempt> = new Map();
   private reconnectIntervals: Map<string, NodeJS.Timeout> = new Map();
   private _initialized: Promise<void>;
+  private oauthConsolidationManager: OAuthConsolidationManager;
 
-  constructor(private serverConfigs: BackendServerConfig[]) {
+  constructor(private serverConfigs: BackendServerConfig[], oauthConsolidationManager?: OAuthConsolidationManager) {
+    this.oauthConsolidationManager = oauthConsolidationManager || new OAuthConsolidationManager();
     this._initialized = this.initializeServers();
   }
 
@@ -51,17 +70,23 @@ export class BackendServerManager {
     await this._initialized;
   }
 
-  private async initializeServers() {
-    console.error(`Initializing ${this.serverConfigs.length} backend servers...`);
+  private async initializeServers(): Promise<void> {
+    Logger.info(`Initializing ${this.serverConfigs.length} backend servers...`, { component: getComponentName() });
+
+    // Register OAuth servers first
     for (const config of this.serverConfigs) {
       if (config.enabled) {
-        console.error(`Connecting to server: ${config.id} (${config.name})`);
+        Logger.debug(`🔐 Registering OAuth server: ${config.id} (${config.name})`, { component: getComponentName() });
+        await this.oauthConsolidationManager.registerOAuthRequirement(config.id, config);
+      }
+      if (config.enabled) {
+        Logger.debug(`Connecting to server: ${config.id} (${config.name})`, { component: getComponentName() });
         await this.connectToServer(config);
       } else {
-        console.error(`Skipping disabled server: ${config.id} (${config.name})`);
+        Logger.debug(`Skipping disabled server: ${config.id} (${config.name})`, { component: getComponentName() });
       }
     }
-    console.error(`Backend server initialization complete. ${this.connections.size} servers connected.`);
+    Logger.info(`Backend server initialization complete. ${this.connections.size} servers connected.`, { component: getComponentName() });
   }
 
   async connectToServer(config: BackendServerConfig): Promise<void> {
@@ -89,7 +114,21 @@ export class BackendServerManager {
             command: config.stdio.command,
             args: config.stdio.args || [],
             env: config.stdio.env,
+            // Use "pipe" to capture stderr for logging
+            stderr: "pipe",
           });
+          
+          // Set up stderr logging after transport creation
+          const stderrStream = transport.stderr;
+          if (stderrStream) {
+            stderrStream.on("data", (data) => {
+              Logger.error(`Server ${config.id} stderr: ${data.toString().trim()}`, { 
+                component: getComponentName(),
+                serverId: config.id,
+                serverName: config.name
+              });
+            });
+          }
           break;
         case "http":
           if (!config.http) {
@@ -114,7 +153,19 @@ export class BackendServerManager {
           throw new Error(`Unsupported transport type: ${config.transportType}`);
       }
 
-      await client.connect(transport);
+      Logger.debug(`🔗 Attempting to connect to server: ${config.name} (${config.id})`, { component: getComponentName() });
+      
+      // Add timeout to connection attempt to prevent hanging
+      const connectPromise = client.connect(transport);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error("Connection timeout - server did not respond to initialize request within 30 seconds"));
+        }, 30000);
+      });
+      
+      Logger.debug(`⏳ Waiting for server ${config.id} to respond to initialize request...`, { component: getComponentName() });
+      await Promise.race([connectPromise, timeoutPromise]);
+      Logger.debug(`✅ Server ${config.id} responded to initialize request successfully`, { component: getComponentName() });
 
       const connection: BackendServerConnection = {
         config,
@@ -137,21 +188,59 @@ export class BackendServerManager {
       await this.loadServerCapabilities(connection);
 
       this.connections.set(config.id, connection);
-      console.error(`Connected to backend server: ${config.name} (${config.id})`);
+      
+      // Remove from failed servers if it was there
+      this.failedServers.delete(config.id);
+      
+      Logger.info(`Connected to backend server: ${config.name} (${config.id})`, { component: getComponentName() });
     } catch (error) {
-      console.error(`Failed to connect to server ${config.id}:`, error);
-      const status: BackendServerStatus = {
-        id: config.id,
-        connected: false,
-        lastError: error instanceof Error ? error.message : String(error),
-      };
+      Logger.error(`Failed to connect to server ${config.id}`, { 
+        component: getComponentName(),
+        serverId: config.id,
+        serverName: config.name,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      
+      // Check if this is an OAuth-related error and register with OAuth consolidation manager
+      if (this.isOAuthError(errorMessage)) {
+        Logger.debug(`🔐 OAuth requirement detected for server ${config.id}, registering with OAuth consolidation manager`, { component: getComponentName() });
+        await this.oauthConsolidationManager.detectOAuthFromError(config.id, config, errorMessage);
+      }
+      
+      // Track failed server attempt
+      const existingFailure = this.failedServers.get(config.id);
+      const now = new Date();
+      
+      if (existingFailure) {
+        // Update existing failure record
+        existingFailure.attemptCount++;
+        existingFailure.lastAttempt = now;
+        existingFailure.status.lastError = errorMessage;
+      } else {
+        // Create new failure record
+        const failedAttempt: FailedServerAttempt = {
+          config,
+          status: {
+            id: config.id,
+            connected: false,
+            lastError: errorMessage,
+          },
+          attemptCount: 1,
+          firstFailure: now,
+          lastAttempt: now,
+        };
+        this.failedServers.set(config.id, failedAttempt);
+      }
+      
       this.scheduleReconnect(config);
     }
   }
 
   private async loadServerCapabilities(connection: BackendServerConnection) {
     try {
-      console.error(`Loading capabilities for server: ${connection.config.id}`);
+      Logger.info(`Loading capabilities for server: ${connection.config.id}`, { component: getComponentName() });
       
       // Load tools
       const toolsResult = await connection.client.listTools();
@@ -161,9 +250,9 @@ export class BackendServerManager {
           connection.tools.set(tool.name, tool);
         }
         connection.status.toolsCount = toolsResult.tools.length;
-        console.error(`Loaded ${toolsResult.tools.length} tools for server ${connection.config.id}: ${toolsResult.tools.map(t => t.name).join(', ')}`);
+        Logger.info(`Loaded ${toolsResult.tools.length} tools for server ${connection.config.id}: ${toolsResult.tools.map(t => t.name).join(', ')}`, { component: getComponentName() });
       } else {
-        console.error(`No tools found for server ${connection.config.id}`);
+        Logger.info(`No tools found for server ${connection.config.id}`, { component: getComponentName() });
       }
 
       // Load resources
@@ -175,7 +264,7 @@ export class BackendServerManager {
             connection.resources.set(resource.uri, resource);
           }
           connection.status.resourcesCount = resourcesResult.resources.length;
-          console.error(`Loaded ${resourcesResult.resources.length} resources for server ${connection.config.id}`);
+          Logger.info(`Loaded ${resourcesResult.resources.length} resources for server ${connection.config.id}`, { component: getComponentName() });
         }
       } catch (error) {
         // Resources not supported
@@ -195,7 +284,7 @@ export class BackendServerManager {
         // Prompts not supported
       }
     } catch (error) {
-      console.error(`Failed to load capabilities for server ${connection.config.id}:`, error);
+      Logger.error(`Failed to load capabilities for server ${connection.config.id}:`, { component: getComponentName() });
     }
   }
 
@@ -223,10 +312,13 @@ export class BackendServerManager {
       try {
         await connection.client.close();
       } catch (error) {
-        console.error(`Error closing connection to ${serverId}:`, error);
+        Logger.error(`Error closing connection to ${serverId}:`, { component: getComponentName() });
       }
       this.connections.delete(serverId);
     }
+
+    // Also remove from failed servers
+    this.failedServers.delete(serverId);
 
     const interval = this.reconnectIntervals.get(serverId);
     if (interval) {
@@ -241,6 +333,30 @@ export class BackendServerManager {
 
   getAllConnections(): BackendServerConnection[] {
     return Array.from(this.connections.values());
+  }
+
+  getFailedServers(): FailedServerAttempt[] {
+    return Array.from(this.failedServers.values());
+  }
+
+  getAllServerStatuses(): Array<BackendServerConnection | FailedServerAttempt> {
+    const connected = Array.from(this.connections.values());
+    const failed = Array.from(this.failedServers.values());
+    const disabled = this.serverConfigs
+      .filter(config => !config.enabled && !this.connections.has(config.id) && !this.failedServers.has(config.id))
+      .map(config => ({
+        config,
+        status: {
+          id: config.id,
+          connected: false,
+          lastError: 'Server disabled',
+        },
+        attemptCount: 0,
+        firstFailure: new Date(),
+        lastAttempt: new Date(),
+      } as FailedServerAttempt));
+    
+    return [...connected, ...failed, ...disabled];
   }
 
   getConnectedServers(): BackendServerConnection[] {
@@ -274,7 +390,7 @@ export class BackendServerManager {
     try {
       return await connection.client.callTool({ name: toolName, arguments: args });
     } catch (error) {
-      console.error(`Error calling tool ${toolName} on server ${serverId}:`, error);
+      Logger.error(`Error calling tool ${toolName} on server ${serverId}:`, { component: getComponentName() });
       throw error;
     }
   }
@@ -284,8 +400,8 @@ export class BackendServerManager {
     toolName: string,
     authInfo?: AuthInfo
   ): boolean {
-    const security = config.security;
-    if (!security) return true;
+    const {security} = config;
+    if (!security) {return true};
 
     // Check blocked tools
     if (security.blockedTools?.includes(toolName)) {
@@ -362,5 +478,74 @@ export class BackendServerManager {
       this.disconnectServer(serverId)
     );
     await Promise.all(disconnectPromises);
+  }
+
+  /**
+   * Get the OAuth consolidation manager
+   */
+  getOAuthManager(): OAuthConsolidationManager {
+    return this.oauthConsolidationManager;
+  }
+
+  /**
+   * Get servers that need OAuth authentication
+   */
+  getOAuthServers() {
+    return this.oauthConsolidationManager.getOAuthRequirements();
+  }
+
+  /**
+   * Check if a server needs OAuth
+   */
+  serverNeedsOAuth(serverId: string): boolean {
+    const requirements = this.oauthConsolidationManager.getOAuthRequirements();
+    return requirements.some(req => req.serverId === serverId && req.needsOAuth);
+  }
+
+  /**
+   * Check if a server configuration indicates OAuth requirement
+   */
+  private needsOAuth(config: BackendServerConfig): boolean {
+    // GitHub MCP server always needs OAuth
+    if (this.isGitHubMcpServer(config)) {
+      return true;
+    }
+    
+    // Check if server explicitly declares OAuth requirement
+    return config.security?.requireAuth === true;
+  }
+
+  /**
+   * Check if this is the GitHub MCP server
+   */
+  private isGitHubMcpServer(config: BackendServerConfig): boolean {
+    const baseUrl = config.http?.url || config.sse?.url || '';
+    return baseUrl.includes('githubcopilot.com') || 
+           baseUrl.includes('github.com') ||
+           config.id === 'github' ||
+           config.name?.toLowerCase().includes('github');
+  }
+
+  /**
+   * Check if an error indicates OAuth is needed
+   */
+  private isOAuthError(error?: string): boolean {
+    if (!error) {return false};
+    
+    const oauthIndicators = [
+      'authorization',
+      'unauthorized',
+      '401',
+      'access_token',
+      'oauth',
+      'bearer',
+      'authentication required',
+      'missing required authorization header',
+      'invalid_token',
+      'token_expired'
+    ];
+    
+    const errorLower = error.toLowerCase();
+    return oauthIndicators.some(indicator => errorLower.includes(indicator));
   }
 }

@@ -77,6 +77,9 @@ export class McpHttpServerManager {
   }
 
   private setupRoutes(app: express.Application, proxyServer: ProxyMcpServer, io: SocketIOServer) {
+    // Setup OAuth routes with CORS support
+    this.setupOAuthRoutes(app, proxyServer);
+    
     // Health check
     app.get('/health', (req, res) => {
       res.json({ 
@@ -240,6 +243,189 @@ export class McpHttpServerManager {
       req.on('close', () => {
         console.log(`Client ${clientId} disconnected`);
       });
+    });
+  }
+
+  private setupOAuthRoutes(app: express.Application, proxyServer: ProxyMcpServer) {
+    const oauthProvider = proxyServer.backend.getOAuthManager();
+    
+    // Enhanced CORS middleware for OAuth routes
+    const oauthCorsMiddleware = (req: any, res: any, next: any) => {
+      // Set comprehensive CORS headers
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Max-Age', '86400');
+      
+      // Handle preflight OPTIONS requests
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+      }
+      
+      next();
+    };
+    
+    // Apply CORS middleware to all OAuth routes
+    app.use('/.well-known', oauthCorsMiddleware);
+    app.use('/oauth', oauthCorsMiddleware);
+    
+    // OAuth metadata endpoint for the proxy server
+    app.get('/.well-known/oauth-authorization-server', (req, res) => {
+      res.json({
+        issuer: `${req.protocol}://${req.get('host')}/oauth`,
+        authorization_endpoint: `${req.protocol}://${req.get('host')}/oauth/authorize`,
+        token_endpoint: `${req.protocol}://${req.get('host')}/oauth/token`,
+        jwks_uri: `${req.protocol}://${req.get('host')}/oauth/jwks`,
+        scopes_supported: ['read', 'write', 'admin'],
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
+        token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+        code_challenge_methods_supported: ['S256']
+      });
+    });
+    
+    // OAuth authorization endpoint - redirect to specific server OAuth
+    app.get('/oauth/authorize', async (req, res) => {
+      try {
+        const { client_id, redirect_uri, scope, state, code_challenge, server_id } = req.query;
+        
+        // If server_id is specified, use that server's OAuth provider
+        const serverId = server_id as string;
+        if (serverId) {
+          const serverInfo = oauthProvider.getOAuthServerInfo(serverId);
+          if (!serverInfo) {
+            return res.status(404).json({ error: 'OAuth server not found' });
+          }
+          
+          // Get client information
+          const client = await serverInfo.clientStore.getClient(client_id as string);
+          if (!client) {
+            return res.status(400).json({ error: 'Invalid client_id' });
+          }
+          
+          // Prepare authorization parameters
+          const authParams = {
+            state: state as string,
+            scopes: (scope as string)?.split(' ') || ['read'],
+            codeChallenge: code_challenge as string,
+            redirectUri: redirect_uri as string
+          };
+          
+          // Delegate to server-specific OAuth provider
+          await serverInfo.provider.authorize(client, authParams, res);
+          return;
+        }
+        
+        // Default OAuth server list if no specific server
+        const oauthServers = oauthProvider.getAllOAuthServers();
+        const serverList = oauthServers.map((server: { serverId: string; config: { name?: string } }) => ({
+          serverId: server.serverId,
+          serverName: server.config.name,
+          authorizationUrl: `${req.protocol}://${req.get('host')}/oauth/authorize?server_id=${server.serverId}&client_id=${client_id}&redirect_uri=${redirect_uri}&scope=${scope || 'read'}&state=${state || ''}&code_challenge=${code_challenge || ''}`
+        }));
+        
+        res.json({
+          message: 'Multiple OAuth servers available',
+          servers: serverList
+        });
+      } catch (error) {
+        console.error('OAuth authorization error:', error);
+        res.status(500).json({ 
+          error: 'Authorization failed', 
+          details: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+    
+    // OAuth token endpoint
+    app.post('/oauth/token', async (req, res) => {
+      try {
+        const { grant_type, code, client_id, client_secret, redirect_uri, refresh_token, server_id } = req.body;
+        
+        // Find the appropriate OAuth server
+        const serverId = server_id;
+        if (!serverId) {
+          return res.status(400).json({ error: 'server_id required' });
+        }
+        
+        const serverInfo = oauthProvider.getOAuthServerInfo(serverId);
+        if (!serverInfo) {
+          return res.status(404).json({ error: 'OAuth server not found' });
+        }
+        
+        // Get client information
+        const client = await serverInfo.clientStore.getClient(client_id);
+        if (!client) {
+          return res.status(400).json({ error: 'Invalid client_id' });
+        }
+        
+        let tokens;
+        
+        if (grant_type === 'authorization_code') {
+          tokens = await serverInfo.provider.exchangeAuthorizationCode(
+            client, 
+            code, 
+            undefined, // code_verifier
+            redirect_uri
+          );
+        } else if (grant_type === 'refresh_token') {
+          tokens = await serverInfo.provider.exchangeRefreshToken(
+            client, 
+            refresh_token
+          );
+        } else {
+          return res.status(400).json({ error: 'Unsupported grant_type' });
+        }
+        
+        res.json(tokens);
+      } catch (error) {
+        console.error('OAuth token error:', error);
+        res.status(500).json({ 
+          error: 'Token exchange failed', 
+          details: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+    
+    // OAuth server information endpoint
+    app.get('/mcp/oauth/servers', (req, res) => {
+      try {
+        const oauthServers = oauthProvider.getAllOAuthServers();
+        res.json({ 
+          servers: oauthServers.map(server => ({
+            serverId: server.serverId,
+            serverName: server.config.name,
+            authorizationUrl: `${req.protocol}://${req.get('host')}/oauth/authorize?server_id=${server.serverId}`,
+            tokenUrl: `${req.protocol}://${req.get('host')}/oauth/token`,
+            configured: true
+          }))
+        });
+      } catch (error) {
+        res.status(500).json({ error: 'Failed to get OAuth server information' });
+      }
+    });
+    
+    // OAuth authorization URL endpoint for specific server
+    app.get('/mcp/oauth/:serverId/authorize', (req, res) => {
+      try {
+        const { serverId } = req.params;
+        const { redirect_uri, scopes } = req.query;
+        
+        const serverInfo = oauthProvider.getOAuthServerInfo(serverId);
+        if (!serverInfo) {
+          return res.status(404).json({ error: 'Server not found or OAuth not configured' });
+        }
+        
+        const redirectUri = redirect_uri as string || `${req.protocol}://${req.get('host')}/oauth/callback`;
+        const scopeList = typeof scopes === 'string' ? scopes.split(',') : ['read'];
+        
+        const authUrl = `${req.protocol}://${req.get('host')}/oauth/authorize?server_id=${serverId}&client_id=${serverInfo.serverId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopeList.join(' ')}&response_type=code`;
+        
+        res.json({ authorizationUrl: authUrl });
+      } catch (error) {
+        res.status(500).json({ error: 'Failed to get authorization URL' });
+      }
     });
   }
 

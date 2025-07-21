@@ -1,5 +1,11 @@
 // PromptManager handles prompt logic for McpServer
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { Logger } from "../utils/logging.js";
+// Component name for logging
+function getComponentName() {
+  return "prompt-manager";
+}
+
 
 export interface PromptDefinition {
   name: string;
@@ -121,7 +127,7 @@ export class PromptManager {
         },
       };
     } catch (error) {
-      console.error(`Completion error for prompt ${ref.name}:`, error);
+      Logger.error(`Completion error for prompt ${ref.name}:`, { component: getComponentName() });
       return { completion: { values: [] } };
     }
   }

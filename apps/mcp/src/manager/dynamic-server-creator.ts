@@ -1,3 +1,12 @@
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
+
+// Debug logging function that only outputs when debug is enabled
+function debugLog(...args: any[]) {
+  if (DEBUG_ENABLED) {
+    console.error(...args);
+  }
+}
 // DynamicServerCreator handles creation of new MCP servers from LLM instructions
 import { BackendServerConfig, BackendServerTransportType } from "../types.js";
 import { randomUUID } from "crypto";
