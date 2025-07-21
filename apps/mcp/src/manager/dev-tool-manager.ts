@@ -108,8 +108,8 @@ export class DevToolManager {
     const uptime = Date.now() - this.startTime;
     const allTools = this.proxyToolManager.getAllTools();
     const enabledTools = this.proxyToolManager.getEnabledTools();
-    const backendServers = this.backendServerManager.getAllServers();
-    const connectedServers = backendServers.filter(server => server.connected);
+    const backendConnections = this.backendServerManager.getAllConnections();
+    const connectedServers = backendConnections.filter(conn => conn.status.connected);
     
     const recentErrors = this.errorLog
       .filter(entry => entry.level === 'error')
@@ -120,7 +120,7 @@ export class DevToolManager {
       memoryUsage,
       toolsCount: allTools.length,
       enabledToolsCount: enabledTools.size,
-      backendServersCount: backendServers.length,
+      backendServersCount: backendConnections.length,
       connectedBackendServers: connectedServers.length,
       lastError: this.errorLog.filter(e => e.level === 'error').pop(),
       recentErrors
@@ -167,7 +167,7 @@ export class DevToolManager {
           `🚀 MCP Server Status (Dev Mode)`,
           ``,
           `⏱️  Uptime: ${Math.floor(diagnostics.uptime / 1000)}s`,
-          `🧠 Memory Usage: ${Math.round(diagnostics.memoryUsage.used / 1024 / 1024)}MB used, ${Math.round(diagnostics.memoryUsage.heapUsed / 1024 / 1024)}MB heap`,
+          `🧠 Memory Usage: ${Math.round(diagnostics.memoryUsage.heapUsed / 1024 / 1024)}MB heap, ${Math.round(diagnostics.memoryUsage.rss / 1024 / 1024)}MB RSS`,
           `🔧 Tools: ${diagnostics.enabledToolsCount}/${diagnostics.toolsCount} enabled`,
           `🔗 Backend Servers: ${diagnostics.connectedBackendServers}/${diagnostics.backendServersCount} connected`,
           `❌ Recent Errors: ${diagnostics.recentErrors.length}`,
@@ -420,15 +420,15 @@ export class DevToolManager {
         }
 
         // Check backend server resource capabilities
-        const backendServers = this.backendServerManager.getAllServers();
+        const backendConnections = this.backendServerManager.getAllConnections();
         diagnosticsMessage.push(`🔗 Backend Server Resource Status:`);
         
-        for (const server of backendServers) {
-          const status = server.connected ? '✅ Connected' : '❌ Disconnected';
+        for (const connection of backendConnections) {
+          const status = connection.status.connected ? '✅ Connected' : '❌ Disconnected';
           diagnosticsMessage.push(
-            `   📡 ${server.id} (${server.name})`,
+            `   📡 ${connection.config.id} (${connection.config.name})`,
             `      Status: ${status}`,
-            `      Resources: ${server.resourcesCount || 'Unknown'}`
+            `      Resources: ${connection.status.resourcesCount || 'Unknown'}`
           );
         }
 
@@ -460,37 +460,37 @@ export class DevToolManager {
         },
       }),
       handler: async ({ serverId, includeConfig }) => {
-        const backendServers = this.backendServerManager.getAllServers();
-        let serversToCheck = backendServers;
+        const backendConnections = this.backendServerManager.getAllConnections();
+        let connectionsToCheck = backendConnections;
         
         if (serverId) {
-          serversToCheck = backendServers.filter(server => server.id === serverId);
+          connectionsToCheck = backendConnections.filter(conn => conn.config.id === serverId);
         }
 
         const statusMessage = [
           `🔗 Backend Server Status`,
           ``,
-          `📊 Overview: ${backendServers.filter(s => s.connected).length}/${backendServers.length} servers connected`,
+          `📊 Overview: ${backendConnections.filter(c => c.status.connected).length}/${backendConnections.length} servers connected`,
           ``
         ];
 
-        for (const server of serversToCheck) {
-          const status = server.connected ? '✅ Connected' : '❌ Disconnected';
-          const lastConnected = server.lastConnected ? 
-            `Last connected: ${server.lastConnected.toISOString()}` : 
+        for (const connection of connectionsToCheck) {
+          const status = connection.status.connected ? '✅ Connected' : '❌ Disconnected';
+          const lastConnected = connection.status.lastConnected ? 
+            `Last connected: ${connection.status.lastConnected.toISOString()}` : 
             'Never connected';
           
           statusMessage.push(
-            `📡 ${server.id} - ${server.name}`,
+            `📡 ${connection.config.id} - ${connection.config.name}`,
             `   Status: ${status}`,
             `   ${lastConnected}`,
-            `   Tools: ${server.toolsCount || 'Unknown'}`,
-            `   Resources: ${server.resourcesCount || 'Unknown'}`,
-            `   Prompts: ${server.promptsCount || 'Unknown'}`
+            `   Tools: ${connection.status.toolsCount || 'Unknown'}`,
+            `   Resources: ${connection.status.resourcesCount || 'Unknown'}`,
+            `   Prompts: ${connection.status.promptsCount || 'Unknown'}`
           );
           
-          if (server.lastError) {
-            statusMessage.push(`   Last Error: ${server.lastError}`);
+          if (connection.status.lastError) {
+            statusMessage.push(`   Last Error: ${connection.status.lastError}`);
           }
           
           statusMessage.push('');
@@ -550,23 +550,23 @@ export class DevToolManager {
         }
 
         // Check backend server connections
-        const backendServers = this.backendServerManager.getAllServers();
-        let serversToCheck = backendServers;
+        const backendConnections = this.backendServerManager.getAllConnections();
+        let connectionsToCheck = backendConnections;
         
         if (serverId) {
-          serversToCheck = backendServers.filter(server => server.id === serverId);
+          connectionsToCheck = backendConnections.filter(conn => conn.config.id === serverId);
         }
 
         diagnosticsMessage.push(`🔗 Server Connection Status:`);
         
-        for (const server of serversToCheck) {
-          const status = server.connected ? '✅ Connected' : '❌ Disconnected';
+        for (const connection of connectionsToCheck) {
+          const status = connection.status.connected ? '✅ Connected' : '❌ Disconnected';
           diagnosticsMessage.push(
-            `   📡 ${server.id}: ${status}`
+            `   📡 ${connection.config.id}: ${status}`
           );
           
-          if (!server.connected && server.lastError) {
-            diagnosticsMessage.push(`      Error: ${server.lastError}`);
+          if (!connection.status.connected && connection.status.lastError) {
+            diagnosticsMessage.push(`      Error: ${connection.status.lastError}`);
           }
         }
 
@@ -616,7 +616,7 @@ export class DevToolManager {
           );
           
           // Check for common configuration issues
-          const issues = [];
+          const issues: string[] = [];
           
           config.servers.forEach(server => {
             if (!server.transportType) {
@@ -742,7 +742,7 @@ export class DevToolManager {
         diagnosticsMessage.push(
           `📈 Resource Counts:`,
           `   Error log entries: ${this.errorLog.length}`,
-          `   Backend servers: ${this.backendServerManager.getAllServers().length}`,
+          `   Backend servers: ${this.backendServerManager.getAllConnections().length}`,
           `   Total tools: ${this.proxyToolManager.getAllTools().length}`,
           `   Enabled tools: ${this.proxyToolManager.getEnabledTools().size}`,
           ``

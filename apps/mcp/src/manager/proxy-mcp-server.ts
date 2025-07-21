@@ -12,12 +12,14 @@ import {
 import { createTool, createToolDefinition } from "../utils/tools.js";
 import { z } from "zod";
 import { ToolCapability } from '../types';
+import { DevToolManager } from './dev-tool-manager.js';
 
 export class ProxyMcpServer extends McpServer {
   private backendServerManager: BackendServerManager;
   private configurationManager: ConfigurationManager;
   private proxyToolManager: ProxyToolManager;
   private dynamicServerCreator: DynamicServerCreator;
+  private devToolManager?: DevToolManager;
 
   // Static factory method for async initialization
   static async create({
@@ -122,6 +124,24 @@ export class ProxyMcpServer extends McpServer {
       proxyToolManager.addTool(tool);
     }
 
+    // Initialize and add development tools if in dev mode
+    let devToolManager: DevToolManager | undefined;
+    if (DevToolManager.isDevModeEnabled()) {
+      console.error("🔧 Development mode enabled - initializing dev tools...");
+      devToolManager = new DevToolManager(
+        backendServerManager,
+        proxyToolManager,
+        configMgr
+      );
+      
+      const devTools = devToolManager.getDevTools();
+      for (const tool of devTools) {
+        proxyToolManager.addTool(tool);
+      }
+      
+      console.error(`🛠️ Added ${devTools.length} development tools`);
+    }
+
     // Get all tools from the proxy tool manager (includes discovery tools + backend server tools + management tools)
     const allTools: ToolCapability[] = proxyToolManager.getAllTools();
     
@@ -129,6 +149,20 @@ export class ProxyMcpServer extends McpServer {
     console.error(`🔧 Enabled tools: ${proxyToolManager.getEnabledTools().size}`);
 
     // Enhanced instructions for proxy server
+    const devToolsInstructions = DevToolManager.isDevModeEnabled() ? `
+
+### Development Tools (Dev Mode Only):
+- \`dev_server_status\`: Get comprehensive server status and health information
+- \`dev_error_logs\`: Retrieve recent error logs, warnings, and diagnostic information
+- \`dev_tool_diagnostics\`: Analyze tool loading, execution issues, and availability
+- \`dev_resource_diagnostics\`: Check resource loading issues and availability
+- \`dev_backend_server_status\`: Get detailed status of all backend MCP servers
+- \`dev_connection_diagnostics\`: Diagnose connection issues with backend servers
+- \`dev_configuration_diagnostics\`: Validate server configuration and check for issues
+- \`dev_memory_diagnostics\`: Monitor memory usage and performance metrics
+
+These development tools provide detailed diagnostic information to help identify and resolve issues automatically.` : '';
+
     const proxyInstructions = `
 # MCP Proxy Server
 
@@ -150,6 +184,7 @@ This is an MCP proxy server that provides access to multiple backend MCP servers
 - \`proxy_config_remove_server\`: Remove a backend server from the configuration
 - \`proxy_config_enable_server\`: Enable a backend server
 - \`proxy_config_disable_server\`: Disable a backend server
+${devToolsInstructions}
 
 ### Backend Server Tools:
 All tools from connected backend servers are exposed with the format: \`{serverId}__{toolName}\`
@@ -181,6 +216,7 @@ ${instructions || ""}`;
     this.backendServerManager = backendServerManager;
     this.proxyToolManager = proxyToolManager;
     this.dynamicServerCreator = dynamicServerCreator;
+    this.devToolManager = devToolManager;
 
     // Override the parent's toolManager with our proxyToolManager
     // @ts-ignore - accessing private field
