@@ -65,6 +65,10 @@ export class BackendServerManager {
 
   private async initializeServers() {
     console.error(`Initializing ${this.serverConfigs.length} backend servers...`);
+    
+    // Force OAuth detection for GitHub servers before connecting
+    await this.oauthManager.forceOAuthDetection(this.serverConfigs);
+    
     for (const config of this.serverConfigs) {
       if (config.enabled) {
         console.error(`Connecting to server: ${config.id} (${config.name})`);

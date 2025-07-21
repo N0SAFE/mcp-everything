@@ -39,6 +39,20 @@ export class OAuthProxyManager {
   }
 
   /**
+   * Force OAuth detection for all configured servers
+   */
+  async forceOAuthDetection(serverConfigs: any[]): Promise<void> {
+    console.error("🔍 Force checking OAuth requirements for all servers...");
+    
+    for (const config of serverConfigs) {
+      if (config.enabled && this.isGitHubMcpServer(config)) {
+        console.error(`🔐 Force enabling OAuth for GitHub server: ${config.id}`);
+        await this.detectOAuthRequirement(config.id, config, "Force OAuth detection for GitHub MCP server");
+      }
+    }
+  }
+
+  /**
    * Detect if a server needs OAuth authentication
    */
   async detectOAuthRequirement(serverId: string, config: BackendServerConfig, error?: string): Promise<boolean> {
@@ -102,6 +116,12 @@ export class OAuthProxyManager {
       return false;
     }
     
+    // GitHub MCP server always supports OAuth
+    if (this.isGitHubMcpServer(config)) {
+      console.error(`🔐 GitHub MCP server detected - OAuth support enabled`);
+      return true;
+    }
+    
     try {
       const baseUrl = config.http?.url || config.sse?.url;
       if (!baseUrl) return false;
@@ -118,6 +138,7 @@ export class OAuthProxyManager {
       }
     } catch (error) {
       // Metadata check failed, not necessarily an OAuth server
+      console.error(`OAuth metadata check failed for ${config.id}:`, error);
     }
     
     return false;
@@ -130,6 +151,11 @@ export class OAuthProxyManager {
     const baseUrl = config.http?.url || config.sse?.url || '';
     if (!baseUrl) return '';
     
+    // Special handling for GitHub MCP Server
+    if (this.isGitHubMcpServer(config)) {
+      return this.getGitHubOAuthUrl(path);
+    }
+    
     try {
       const url = new URL(baseUrl);
       url.pathname = path;
@@ -137,6 +163,31 @@ export class OAuthProxyManager {
     } catch {
       return baseUrl + path;
     }
+  }
+
+  /**
+   * Check if this is the GitHub MCP server
+   */
+  private isGitHubMcpServer(config: BackendServerConfig): boolean {
+    const baseUrl = config.http?.url || config.sse?.url || '';
+    return baseUrl.includes('githubcopilot.com') || 
+           baseUrl.includes('github.com') ||
+           config.id === 'github' ||
+           config.name?.toLowerCase().includes('github');
+  }
+
+  /**
+   * Get correct GitHub OAuth URLs
+   */
+  private getGitHubOAuthUrl(path: string): string {
+    const pathMap: Record<string, string> = {
+      '/oauth/authorize': 'https://github.com/login/oauth/authorize',
+      '/oauth/token': 'https://github.com/login/oauth/access_token',
+      '/oauth/revoke': 'https://github.com/login/oauth/revoke',
+      '/.well-known/oauth-authorization-server': 'https://github.com/.well-known/oauth-authorization-server'
+    };
+    
+    return pathMap[path] || `https://github.com${path}`;
   }
 
   /**
@@ -151,8 +202,20 @@ export class OAuthProxyManager {
           revocationUrl: oauthInfo.revocationUrl,
         },
         verifyAccessToken: async (token: string): Promise<AuthInfo> => {
-          // For now, create a basic AuthInfo
-          // In a real implementation, this would verify the token with the backend server
+          // For GitHub MCP server, create AuthInfo with GitHub token
+          if (this.isGitHubMcpServer(oauthInfo.config)) {
+            return {
+              token,
+              clientId: 'github-mcp-client',
+              scopes: ['repo', 'read:user', 'read:org'],
+              extra: { 
+                serverId: oauthInfo.serverId,
+                provider: 'github'
+              }
+            };
+          }
+          
+          // For other servers, create basic AuthInfo
           return {
             token,
             clientId: 'mcp-proxy',
@@ -161,8 +224,19 @@ export class OAuthProxyManager {
           };
         },
         getClient: async (clientId: string): Promise<OAuthClientInformationFull | undefined> => {
-          // Return basic client info for now
-          // In a real implementation, this would be configured per server
+          // Return GitHub-specific client info for GitHub MCP server
+          if (this.isGitHubMcpServer(oauthInfo.config)) {
+            return {
+              client_id: 'github-mcp-client',
+              client_name: 'GitHub MCP Client',
+              redirect_uris: [`${this.baseUrl}/oauth/callback`],
+              grant_types: ['authorization_code', 'refresh_token'],
+              response_types: ['code'],
+              token_endpoint_auth_method: 'client_secret_basic'
+            };
+          }
+          
+          // Return basic client info for other servers
           return {
             client_id: clientId,
             client_name: `MCP Proxy Client for ${oauthInfo.serverId}`,

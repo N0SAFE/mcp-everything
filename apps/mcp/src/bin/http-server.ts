@@ -77,6 +77,9 @@ export class McpHttpServerManager {
   }
 
   private setupRoutes(app: express.Application, proxyServer: ProxyMcpServer, io: SocketIOServer) {
+    // Setup OAuth routes with CORS support
+    this.setupOAuthRoutes(app, proxyServer);
+    
     // Health check
     app.get('/health', (req, res) => {
       res.json({ 
@@ -240,6 +243,75 @@ export class McpHttpServerManager {
       req.on('close', () => {
         console.log(`Client ${clientId} disconnected`);
       });
+    });
+  }
+
+  private setupOAuthRoutes(app: express.Application, proxyServer: ProxyMcpServer) {
+    const oauthManager = proxyServer.backend.getOAuthManager();
+    
+    // Add OAuth metadata endpoint with CORS
+    app.get('/.well-known/oauth-authorization-server', (req, res) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      
+      const metadataRouter = oauthManager.getOAuthMetadataRouter();
+      metadataRouter(req, res, () => {});
+    });
+    
+    // Add OAuth authorization endpoint with CORS
+    app.use('/oauth', (req, res, next) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      
+      if (req.method === 'OPTIONS') {
+        res.sendStatus(200);
+        return;
+      }
+      next();
+    });
+    
+    // Mount OAuth router
+    app.use('/oauth', oauthManager.getOAuthRouter());
+    
+    // OAuth server information endpoint
+    app.get('/mcp/oauth/servers', (req, res) => {
+      try {
+        const oauthServers = oauthManager.getOAuthServers();
+        res.json({ 
+          servers: oauthServers.map(server => ({
+            serverId: server.serverId,
+            serverName: server.config.name,
+            needsOAuth: server.needsOAuth,
+            authorizationUrl: server.authorizationUrl,
+            configured: server.oauthDetected
+          }))
+        });
+      } catch (error) {
+        res.status(500).json({ error: 'Failed to get OAuth server information' });
+      }
+    });
+    
+    // OAuth authorization URL endpoint
+    app.get('/mcp/oauth/:serverId/authorize', (req, res) => {
+      try {
+        const { serverId } = req.params;
+        const { redirect_uri, scopes } = req.query;
+        
+        const redirectUri = redirect_uri as string || `${req.protocol}://${req.get('host')}/oauth/callback`;
+        const scopeList = typeof scopes === 'string' ? scopes.split(',') : ['read'];
+        
+        const authUrl = oauthManager.getAuthorizationUrl(serverId, redirectUri, scopeList);
+        
+        if (!authUrl) {
+          return res.status(404).json({ error: 'Server not found or OAuth not configured' });
+        }
+        
+        res.json({ authorizationUrl: authUrl });
+      } catch (error) {
+        res.status(500).json({ error: 'Failed to get authorization URL' });
+      }
     });
   }
 
