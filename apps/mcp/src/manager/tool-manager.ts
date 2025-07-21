@@ -1,14 +1,10 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
 // ToolManager handles tool logic for McpServer
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+// Component name for logging
+function getComponentName() {
+  return "tool-manager";
+}
+
 import {
   ToolDefinition,
   ToolsetConfig,
@@ -19,6 +15,7 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import Ajv from 'ajv';
+import { Logger } from "utils/logging";
 
 export type ToolListResponse = {
   tools: (Omit<ToolDefinition, "inputSchema"> & {
@@ -174,12 +171,13 @@ export class ToolManager {
           },
         },
         handler: async (params, req, opts) => {
-          debugLog(
+          Logger.debug(
             `Dynamic tool trigger called with params: ${JSON.stringify(
               params,
               null,
               2
-            )}`
+            )}`,
+            { component: getComponentName() }
           );
           const { toolsets } = params;
           for (const { name, trigger } of toolsets) {
@@ -199,8 +197,9 @@ export class ToolManager {
                 `Unknown tool: ${name}`
               );
             }
-            debugLog(
-              `Dynamic tool trigger: ${trigger} ${name} (${internal})`
+            Logger.debug(
+              `Dynamic tool trigger: ${trigger} ${name} (${internal})`,
+              { component: getComponentName() }
             );
             if (trigger === "enable") {
               this.enabledTools.add(internal);
@@ -257,7 +256,7 @@ export class ToolManager {
       extra: {}
     };
     
-    debugLog(
+    Logger.debug(
       `Checking if tool ${name} is enabled for ${clientId}. result: ${
         this.enabledTools.has(name) ? "enabled" : "not enabled"
       } and canBeEnabled: ${
@@ -269,7 +268,8 @@ export class ToolManager {
         (await this.tools.get(name)?.meta?.canBeEnabled?.(defaultAuthInfo)) !== false
           ? "enabled"
           : "not enabled"
-      }`
+      }`,
+      { component: getComponentName() }
     );
     return (
       this.enabledTools.has(name) &&
@@ -306,7 +306,7 @@ export class ToolManager {
         .map(([_, v]) => {
           // Validate inputSchema before processing
           if (!v.definition.inputSchema) {
-            debugLog(`Tool ${v.definition.name} has no inputSchema, using empty object schema`);
+            Logger.debug(`Tool ${v.definition.name} has no inputSchema, using empty object schema`, { component: getComponentName() });
             return {
               ...v.definition,
               inputSchema: {
@@ -332,7 +332,9 @@ export class ToolManager {
                       }
                     : v.definition),
                   inputSchema: v.definition.inputSchema instanceof z.ZodObject
-                    ? z.toJSONSchema(v.definition.inputSchema)
+                    ? z.toJSONSchema(v.definition.inputSchema, {
+                        target: "draft-7",
+                    })
                     : v.definition.inputSchema,
                 }
               : {
@@ -354,7 +356,7 @@ export class ToolManager {
                   },
                 };
           } catch (error) {
-            debugLog(`Error processing tool ${v.definition.name}:`, error);
+            Logger.logError(error as Error, `Error processing tool ${v.definition.name}`, { component: getComponentName() });
             return {
               ...v.definition,
               inputSchema: {
@@ -462,7 +464,7 @@ export class ToolManager {
       };
       return await toolCapability.handler(validatedData, reqWithDefaults, opts);
     } catch (err) {
-      debugLog("Tool handler error:", err);
+      Logger.logError(err as Error, "Tool handler error", { component: getComponentName() });
       if (err instanceof McpError) {
         throw err;
       }

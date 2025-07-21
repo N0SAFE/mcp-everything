@@ -180,7 +180,25 @@ export MCP_SERVER_1_NAME="File System"
 export MCP_SERVER_1_TRANSPORT=stdio
 export MCP_SERVER_1_COMMAND=npx
 export MCP_SERVER_1_ARGS="-y,@modelcontextprotocol/server-filesystem,/tmp"
+
+# Tool refresh configuration
+export MCP_AUTO_REFRESH_TOOLS=false  # Enable/disable automatic tool refresh (default: false)
+export MCP_REFRESH_INTERVAL=30000    # Refresh interval in milliseconds (default: 30000)
+
+# Debug and development
+export MCP_DEBUG=true                # Enable debug logging (default: false)
+export NODE_ENV=development          # Development mode
 ```
+
+**Tool Refresh Settings:**
+- `MCP_AUTO_REFRESH_TOOLS=true`: Automatically refresh tools from backend servers periodically
+- `MCP_AUTO_REFRESH_TOOLS=false`: Disable automatic refresh (recommended for stability)
+- `MCP_REFRESH_INTERVAL`: How often to check for changes in milliseconds
+- **Note**: Tool change notifications are only sent when tools actually change, preventing unnecessary updates
+
+**Debug Settings:**
+- `MCP_DEBUG=true`: Enables detailed logging for troubleshooting
+- `NODE_ENV=development`: Enables development mode with additional logging
 
 ### Advanced Configuration
 

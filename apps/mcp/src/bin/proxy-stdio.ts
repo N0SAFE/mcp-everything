@@ -4,16 +4,7 @@ import { ProxyMcpServer } from "../manager/proxy-mcp-server.js";
 import { ConfigurationManager } from "../manager/configuration-manager.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { getConfigFromCommanderAndEnv } from "./config.js";
-
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
+import { Logger } from "../utils/logging.js";
 
 async function main() {
   try {
@@ -22,17 +13,20 @@ async function main() {
     
     if (process.env.MCP_PROXY_USE_ENV === "true") {
       configManager = ConfigurationManager.createFromEnvironment();
-      debugLog("Using configuration from environment variables");
+      Logger.debug("Using configuration from environment variables", { component: "proxy-stdio" });
     } else {
       configManager = new ConfigurationManager(process.env.MCP_PROXY_CONFIG_PATH);
-      debugLog(`Using configuration from file: ${process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"}`);
+      Logger.debug(`Using configuration from file: ${process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"}`, { 
+        component: "proxy-stdio",
+        configPath: process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"
+      });
     }
 
     // Get toolset configuration from command line/environment
     const toolsetConfig = getConfigFromCommanderAndEnv();
 
     // Create proxy server with async initialization
-    debugLog("🚀 Initializing MCP Proxy Server...");
+    Logger.info("🚀 Initializing MCP Proxy Server...", { component: "proxy-stdio" });
     const server = await ProxyMcpServer.create({
       name: "mcp-proxy-server",
       version: "1.0.0",
@@ -104,6 +98,9 @@ proxy_create_custom_server({
     const transport = new StdioServerTransport();
     await server.server.connect(transport);
     
+    // Set up the logger with the MCP server instance
+    Logger.setMcpServer(server.server);
+    
     // Notify the client that tools, resources, and prompts are available after initialization
     server.server.sendToolListChanged();
     server.server.sendResourceListChanged();
@@ -114,11 +111,18 @@ proxy_create_custom_server({
       data: "MCP Proxy Server started successfully",
     });
 
-    debugLog("MCP Proxy Server running on stdio");
-    debugLog(`Configured servers: ${configManager.getServers().length}`);
-    debugLog(`Active servers: ${server.backend.getConnectedServers().length}`);
+    Logger.info("MCP Proxy Server running on stdio", { 
+      component: "proxy-stdio",
+      configuredServers: configManager.getServers().length,
+      activeServers: server.backend.getConnectedServers().length
+    });
 
   } catch (error) {
+    Logger.critical("Failed to start MCP Proxy Server", { 
+      component: "proxy-stdio", 
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     console.error("Failed to start MCP Proxy Server:", error);
     process.exit(1);
   }
@@ -126,16 +130,21 @@ proxy_create_custom_server({
 
 // Handle graceful shutdown
 process.on("SIGINT", () => {
-  debugLog("Received SIGINT, shutting down gracefully...");
+  Logger.info("Received SIGINT, shutting down gracefully...", { component: "proxy-stdio", signal: "SIGINT" });
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
-  debugLog("Received SIGTERM, shutting down gracefully...");
+  Logger.info("Received SIGTERM, shutting down gracefully...", { component: "proxy-stdio", signal: "SIGTERM" });
   process.exit(0);
 });
 
 main().catch((err) => {
+  Logger.critical("Fatal error in main process", { 
+    component: "proxy-stdio", 
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined
+  });
   console.error("Fatal error:", err);
   process.exit(1);
 });

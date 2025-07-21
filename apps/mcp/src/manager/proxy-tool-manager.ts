@@ -1,5 +1,10 @@
 // ProxyToolManager creates and manages proxy tools that forward calls to backend servers
 import { ToolManager } from "./tool-manager.js";
+// Component name for logging
+function getComponentName() {
+  return "proxy-tool-manager";
+}
+
 import { BackendServerManager } from "./backend-server-manager.js";
 import {
   ToolDefinition,
@@ -10,16 +15,7 @@ import {
   DynamicToolDiscoveryOptions,
 } from "../types.js";
 import { createTool, createToolDefinition } from "../utils/tools.js";
-
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
+import { Logger } from "../utils/logging.js";
 import { z } from "zod";
 
 export class ProxyToolManager extends ToolManager {
@@ -274,24 +270,53 @@ export class ProxyToolManager extends ToolManager {
   
   hasTools() {return true}
 
-  private async loadProxyToolsFromServers() {
-    debugLog("Loading proxy tools from servers...");
+  private async loadProxyToolsFromServers(): Promise<number> {
+    Logger.debug("Loading proxy tools from servers...", { component: "proxy-tool-manager" });
     const connections = this.backendServerManager.getConnectedServers();
-    debugLog(`Found ${connections.length} connected servers`);
+    Logger.debug(`Found ${connections.length} connected servers`, { 
+      component: "proxy-tool-manager",
+      connectedServers: connections.length
+    });
     const proxyTools: ToolCapability[] = [];
+    let newToolsAddedCount = 0;
 
     for (const connection of connections) {
-      debugLog(`Loading tools from server: ${connection.config.id} (${connection.tools.size} tools)`);
+      Logger.debug(`Loading tools from server: ${connection.config.id} (${connection.tools.size} tools)`, {
+        component: "proxy-tool-manager",
+        serverId: connection.config.id,
+        serverName: connection.config.name,
+        toolCount: connection.tools.size
+      });
       for (const [toolName, tool] of connection.tools) {
         // Create proxy tool
         const proxyToolName = `${connection.config.id}__${toolName}`;
+        
+        // Skip if tool already exists (avoid duplicates during refresh)
+        if (this.tools.has(proxyToolName)) {
+          Logger.debug(`Proxy tool ${proxyToolName} already exists, skipping`, {
+            component: "proxy-tool-manager",
+            toolName: proxyToolName,
+            serverId: connection.config.id
+          });
+          continue;
+        }
+        
         const proxyTool = this.createProxyTool(connection.config.id, tool, proxyToolName);
         proxyTools.push(proxyTool);
-        debugLog(`Created proxy tool: ${proxyToolName}`);
+        newToolsAddedCount++;
+        Logger.debug(`Created proxy tool: ${proxyToolName}`, {
+          component: "proxy-tool-manager",
+          toolName: proxyToolName,
+          serverId: connection.config.id,
+          originalTool: toolName
+        });
       }
     }
 
-    debugLog(`Total proxy tools created: ${proxyTools.length}`);
+    Logger.debug(`Total new proxy tools created: ${proxyTools.length}`, {
+      component: "proxy-tool-manager",
+      newToolsCount: proxyTools.length
+    });
 
     // Add proxy tools to the manager
     for (const proxyTool of proxyTools) {
@@ -301,12 +326,20 @@ export class ProxyToolManager extends ToolManager {
       if (this.toolsetConfig.mode === "readWrite" || 
           (proxyTool.definition.annotations?.readOnlyHint !== false)) {
         this.enabledTools.add(proxyTool.definition.name);
-        debugLog(`Enabled proxy tool: ${proxyTool.definition.name}`);
+        Logger.debug(`Enabled proxy tool: ${proxyTool.definition.name}`, {
+          component: "proxy-tool-manager",
+          toolName: proxyTool.definition.name
+        });
       }
     }
     
-    debugLog(`Total tools in manager: ${this.tools.size}`);
-    debugLog(`Total enabled tools: ${this.enabledTools.size}`);
+    Logger.debug(`Total tools in manager: ${this.tools.size}`, {
+      component: "proxy-tool-manager",
+      totalTools: this.tools.size,
+      enabledTools: this.enabledTools.size
+    });
+    
+    return newToolsAddedCount;
   }
 
   private createProxyTool(
@@ -329,15 +362,19 @@ export class ProxyToolManager extends ToolManager {
 
     return createTool(proxyToolDefinition, async (params, req, opts) => {
       try {
-        const result = await this.backendServerManager.callTool(
+        return await this.backendServerManager.callTool(
           serverId,
           originalTool.name,
           params,
           opts.authInfo
         );
-        return result;
       } catch (error) {
-        debugLog(`Error calling tool ${originalTool.name} on server ${serverId}:`, error);
+        Logger.logError(error instanceof Error ? error : String(error), `Error calling tool ${originalTool.name} on server ${serverId}`, {
+          component: "proxy-tool-manager",
+          serverId,
+          toolName: originalTool.name,
+          originalError: error
+        });
         return {
           content: [
             {
@@ -353,33 +390,110 @@ export class ProxyToolManager extends ToolManager {
   private setupServerChangeHandlers() {
     // This would ideally be implemented with event listeners on the BackendServerManager
     // For now, we'll implement a polling mechanism to check for changes
-    setInterval(() => {
-      this.refreshProxyTools();
-    }, 30000); // Check every 30 seconds
+    
+    // Check if auto-refresh is enabled (default: false to prevent tool loss)
+    const autoRefreshEnabled = process.env.MCP_AUTO_REFRESH_TOOLS === "true";
+    const refreshInterval = parseInt(process.env.MCP_REFRESH_INTERVAL || "30000");
+    
+    if (autoRefreshEnabled) {
+      Logger.info(`Setting up auto-refresh with ${refreshInterval}ms interval`, { component: getComponentName() });
+      setInterval(() => {
+        this.refreshProxyTools();
+      }, refreshInterval);
+    } else {
+      Logger.info("Auto-refresh disabled - use manual refresh instead", { component: getComponentName() });
+    }
   }
 
   private async refreshProxyTools() {
-    // Remove all proxy tools (keep discovery tools)
+    Logger.info("Starting proxy tools refresh...", { component: getComponentName() });
+    const currentToolCount = this.tools.size;
+    const currentEnabledCount = this.enabledTools.size;
+    
+    // Capture current state for comparison
+    const beforeRefresh = {
+      tools: new Set(this.tools.keys()),
+      enabled: new Set(this.enabledTools.keys())
+    };
+    
+    // Get current state before refresh
+    const connectedServers = this.backendServerManager.getConnectedServers();
+    Logger.info(`Currently ${connectedServers.length} servers connected`, { component: getComponentName() });
+    
+    // Track which tools we expect to have
+    const expectedTools = new Set<string>();
+    for (const connection of connectedServers) {
+      for (const [toolName] of connection.tools) {
+        expectedTools.add(`${connection.config.id}__${toolName}`);
+      }
+    }
+    
+    // Only remove proxy tools that are no longer available
     const toolsToRemove: string[] = [];
     for (const [toolName, tool] of this.tools) {
-      if (!this.serverDiscoveryTools.some(dt => dt.definition.name === toolName)) {
+      // This is a proxy tool - check if it should still exist
+      if (!this.serverDiscoveryTools.some(dt => dt.definition.name === toolName) && 
+          !expectedTools.has(toolName)) {
         toolsToRemove.push(toolName);
       }
     }
 
+    Logger.info(`Removing ${toolsToRemove.length} unavailable tools`, { component: getComponentName() });
     for (const toolName of toolsToRemove) {
       this.tools.delete(toolName);
       this.enabledTools.delete(toolName);
     }
 
-    // Reload proxy tools
-    await this.loadProxyToolsFromServers();
+    // Add new tools that weren't there before
+    const newToolsAdded = await this.loadProxyToolsFromServers();
 
-    // Notify about tool list changes
-    this.notifyEnabledToolsChanged();
+    const newToolCount = this.tools.size;
+    const newEnabledCount = this.enabledTools.size;
+    
+    // Capture state after refresh for comparison
+    const afterRefresh = {
+      tools: new Set(this.tools.keys()),
+      enabled: new Set(this.enabledTools.keys())
+    };
+    
+    // Check for actual changes
+    const hasToolChanges = !this.setsEqual(beforeRefresh.tools, afterRefresh.tools);
+    const hasEnabledChanges = !this.setsEqual(beforeRefresh.enabled, afterRefresh.enabled);
+    const hasChanges = hasToolChanges || hasEnabledChanges;
+    
+    Logger.info(`Tool refresh complete: ${currentToolCount} → ${newToolCount} tools, ${currentEnabledCount} → ${newEnabledCount} enabled`, { component: getComponentName() });
+    Logger.info(`Tools removed: ${toolsToRemove.length}, Tools added: ${newToolsAdded}, Changes detected: ${hasChanges}`, { component: getComponentName() });
+    
+    // Only notify if there were actual changes
+    if (hasChanges) {
+      Logger.info("Notifying clients of tool list changes", { component: getComponentName() });
+      this.notifyEnabledToolsChanged();
+    } else {
+      Logger.info("No changes detected, skipping notification", { component: getComponentName() });
+    }
+  }
+
+  private setsEqual<T>(set1: Set<T>, set2: Set<T>): boolean {
+    if (set1.size !== set2.size) {
+      return false;
+    }
+    for (const item of set1) {
+      if (!set2.has(item)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   async refreshServerTools(serverId: string) {
+    Logger.info(`Refreshing tools for server: ${serverId}`, { component: getComponentName() });
+    
+    // Capture current state
+    const beforeRefresh = {
+      tools: new Set(this.tools.keys()),
+      enabled: new Set(this.enabledTools.keys())
+    };
+    
     // Remove tools for specific server
     const toolsToRemove: string[] = [];
     for (const [toolName, tool] of this.tools) {
@@ -388,11 +502,14 @@ export class ProxyToolManager extends ToolManager {
       }
     }
 
+    Logger.info(`Removing ${toolsToRemove.length} tools for server ${serverId}`, { component: getComponentName() });
     for (const toolName of toolsToRemove) {
       this.tools.delete(toolName);
       this.enabledTools.delete(toolName);
     }
 
+    let newToolsAdded = 0;
+    
     // Reload tools for this server
     const connection = this.backendServerManager.getServerConnection(serverId);
     if (connection && connection.status.connected) {
@@ -400,6 +517,7 @@ export class ProxyToolManager extends ToolManager {
         const proxyToolName = `${serverId}__${toolName}`;
         const proxyTool = this.createProxyTool(serverId, tool, proxyToolName);
         this.tools.set(proxyTool.definition.name, proxyTool);
+        newToolsAdded++;
         
         if (this.toolsetConfig.mode === "readWrite" || 
             (proxyTool.definition.annotations?.readOnlyHint !== false)) {
@@ -407,8 +525,27 @@ export class ProxyToolManager extends ToolManager {
         }
       }
     }
-
-    this.notifyEnabledToolsChanged();
+    
+    // Capture state after refresh
+    const afterRefresh = {
+      tools: new Set(this.tools.keys()),
+      enabled: new Set(this.enabledTools.keys())
+    };
+    
+    // Check for actual changes
+    const hasToolChanges = !this.setsEqual(beforeRefresh.tools, afterRefresh.tools);
+    const hasEnabledChanges = !this.setsEqual(beforeRefresh.enabled, afterRefresh.enabled);
+    const hasChanges = hasToolChanges || hasEnabledChanges;
+    
+    Logger.info(`Server ${serverId} refresh: removed ${toolsToRemove.length}, added ${newToolsAdded}, changes: ${hasChanges}`, { component: getComponentName() });
+    
+    // Only notify if there were actual changes
+    if (hasChanges) {
+      Logger.info(`Notifying clients of tool changes for server ${serverId}`, { component: getComponentName() });
+      this.notifyEnabledToolsChanged();
+    } else {
+      Logger.info(`No tool changes for server ${serverId}, skipping notification`, { component: getComponentName() });
+    }
   }
 
   protected async notifyEnabledToolsChanged() {

@@ -1,12 +1,3 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
 // McpServer main class split from index.ts
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
@@ -32,6 +23,7 @@ import {
 import { ToolManager } from "./manager/tool-manager";
 import { ResourceManager } from "./manager/resource-manager";
 import { PromptManager } from "./manager/prompt-manager";
+import { Logger } from "./utils/logging.js";
 
 export class McpServer {
   protected readonly _server: Server;
@@ -49,6 +41,7 @@ export class McpServer {
     dynamicToolDiscovery,
     instructions,
     oauthProvider,
+    managers = {},
   }: {
     name: string;
     version: string;
@@ -57,23 +50,28 @@ export class McpServer {
     dynamicToolDiscovery?: DynamicToolDiscoveryOptions;
     instructions?: string;
     oauthProvider?: OAuthServerProvider;
+    managers?: {
+      toolManager?: ToolManager;
+      resourceManager?: ResourceManager;
+      promptManager?: PromptManager;
+    };
   }) {
     this.toolsetConfig = toolsetConfig;
     this.oauthProvider = oauthProvider;
-    this.toolManager = new ToolManager(
-      name,
-      capabilities?.tools || [],
-      toolsetConfig,
-      dynamicToolDiscovery
-    );
     // Ensure resources and prompts are always valid objects
     const resources = capabilities?.resources ?? {
       definitions: {},
       handlers: {},
     };
     const prompts = capabilities?.prompts ?? { definitions: {}, handlers: {} };
-    this.resourceManager = new ResourceManager(resources);
-    this.promptManager = new PromptManager(prompts);
+    this.toolManager = managers.toolManager || new ToolManager(
+      name,
+      capabilities?.tools || [],
+      toolsetConfig,
+      dynamicToolDiscovery
+    );
+    this.resourceManager = managers.resourceManager || new ResourceManager(resources);
+    this.promptManager = managers.promptManager || new PromptManager(prompts);
     // Determine capabilities for the MCP server
     const hasTools = this.toolManager.hasTools();
     const hasResources = this.resourceManager.hasResources();
@@ -221,7 +219,7 @@ export class McpServer {
       );
     }
     // Error handling
-    this._server.onerror = (error) => debugLog("[MCP Error]", error);
+    this._server.onerror = (error) => Logger.logError(error instanceof Error ? error : String(error), "[MCP Error]", { component: "mcp-server" });
     process.on("SIGINT", async () => {
       await this.shutdown();
     });
@@ -250,9 +248,9 @@ export class McpServer {
       }
       
       await this._server.close();
-      debugLog("MCP Server shut down gracefully");
+      Logger.info("MCP Server shut down gracefully", { component: "mcp-server" });
     } catch (error) {
-      debugLog("Error during shutdown:", error);
+      Logger.logError(error instanceof Error ? error : String(error), "Error during shutdown", { component: "mcp-server" });
     }
     process.exit(0);
   }

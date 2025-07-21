@@ -9,16 +9,11 @@ import { ProxyOAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { OAuthClientInformationFull, OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { BackendServerConfig } from "../types.js";
+import { Logger } from "../utils/logging.js";
 import { OAuthConsolidationManager } from "./oauth-consolidation-manager.js";
-
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
+// Component name for logging
+function getComponentName() {
+  return "oauth-proxy-manager";
 }
 
 export interface OAuthServerInfo {
@@ -46,18 +41,18 @@ export class OAuthProxyManager {
    * Initialize OAuth detection for all servers
    */
   private initializeOAuthDetection() {
-    debugLog("🔐 Initializing OAuth detection system...");
+    Logger.info("🔐 Initializing OAuth detection system...", { component: getComponentName() });
   }
 
   /**
    * Force OAuth detection for all configured servers
    */
   async forceOAuthDetection(serverConfigs: any[]): Promise<void> {
-    debugLog("🔍 Force checking OAuth requirements for all servers...");
+    Logger.info("🔍 Force checking OAuth requirements for all servers...", { component: getComponentName() });
     
     for (const config of serverConfigs) {
       if (config.enabled && this.isGitHubMcpServer(config)) {
-        debugLog(`🔐 Force enabling OAuth for GitHub server: ${config.id}`);
+        Logger.info(`🔐 Force enabling OAuth for GitHub server: ${config.id}`, { component: getComponentName() });
         await this.detectOAuthRequirement(config.id, config, "Force OAuth detection for GitHub MCP server");
       }
     }
@@ -89,7 +84,7 @@ export class OAuthProxyManager {
       this.oauthServers.set(serverId, oauthInfo);
       await this.setupOAuthProxy(oauthInfo);
       
-      debugLog(`🔐 OAuth detected for server ${serverId}: ${config.name}`);
+      Logger.info(`🔐 OAuth detected for server ${serverId}: ${config.name}`, { component: getComponentName() });
       return true;
     }
     
@@ -100,7 +95,7 @@ export class OAuthProxyManager {
    * Check if an error indicates OAuth is needed
    */
   private isOAuthError(error?: string): boolean {
-    if (!error) return false;
+    if (!error) {return false;}
     
     const oauthIndicators = [
       'authorization',
@@ -129,14 +124,14 @@ export class OAuthProxyManager {
     
     // GitHub MCP server always supports OAuth
     if (this.isGitHubMcpServer(config)) {
-      debugLog(`🔐 GitHub MCP server detected - OAuth support enabled`);
+      Logger.info(`🔐 GitHub MCP server detected - OAuth support enabled`, { component: getComponentName() });
       return true;
     }
     
     try {
       const baseUrl = config.http?.url || config.sse?.url;
-      if (!baseUrl) return false;
-      
+      if (!baseUrl) {return false;}
+
       const metadataUrl = this.buildOAuthUrl(config, '/.well-known/oauth-authorization-server');
       const response = await fetch(metadataUrl, {
         method: 'GET',
@@ -149,7 +144,7 @@ export class OAuthProxyManager {
       }
     } catch (error) {
       // Metadata check failed, not necessarily an OAuth server
-      debugLog(`OAuth metadata check failed for ${config.id}:`, error);
+      Logger.error(`OAuth metadata check failed for ${config.id}:`, { component: getComponentName() });
     }
     
     return false;
@@ -160,7 +155,7 @@ export class OAuthProxyManager {
    */
   private buildOAuthUrl(config: BackendServerConfig, path: string): string {
     const baseUrl = config.http?.url || config.sse?.url || '';
-    if (!baseUrl) return '';
+    if (!baseUrl) {return ''};
     
     // Special handling for GitHub MCP Server
     if (this.isGitHubMcpServer(config)) {
@@ -260,9 +255,9 @@ export class OAuthProxyManager {
       });
       
       this.oauthProviders.set(oauthInfo.serverId, proxyProvider);
-      debugLog(`🔗 OAuth proxy configured for ${oauthInfo.serverId}`);
+      Logger.info(`🔗 OAuth proxy configured for ${oauthInfo.serverId}`, { component: getComponentName() });
     } catch (error) {
-      debugLog(`❌ Failed to setup OAuth proxy for ${oauthInfo.serverId}:`, error);
+      Logger.error(`❌ Failed to setup OAuth proxy for ${oauthInfo.serverId}:`, { component: getComponentName() });
     }
   }
 
@@ -270,7 +265,7 @@ export class OAuthProxyManager {
    * Get OAuth router for Express app
    */
   getOAuthRouter(): RequestHandler {
-    if (this._router) return this._router;
+    if (this._router) {return this._router};
     
     // Create a custom router that handles OAuth for multiple servers, especially GitHub
     this._router = (req, res, next) => {
@@ -357,7 +352,7 @@ export class OAuthProxyManager {
       });
       
     } catch (error) {
-      debugLog('Error handling GitHub OAuth request:', error);
+      Logger.error('Error handling GitHub OAuth request:', { component: getComponentName() });
       res.status(500).json({ error: 'OAuth request failed' });
     }
   }
@@ -432,7 +427,7 @@ export class OAuthProxyManager {
    */
   getAuthorizationUrl(serverId: string, redirectUri: string, scopes: string[] = ['read']): string | undefined {
     const info = this.oauthServers.get(serverId);
-    if (!info) return undefined;
+    if (!info) {return undefined};
     
     const url = new URL(info.authorizationUrl);
     url.searchParams.set('client_id', 'mcp-proxy');

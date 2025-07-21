@@ -1,15 +1,7 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
-
 import { BackendServerManager } from './backend-server-manager.js';
+import { ResourceManager } from './resource-manager.js';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { Logger } from "../utils/logging.js";
 
 export interface ProxyResourceDefinition {
   uri: string;
@@ -18,10 +10,19 @@ export interface ProxyResourceDefinition {
   mimeType?: string;
 }
 
-export class ProxyResourceManager {
+function getComponentName() {
+  return "proxy-resource-manager";
+}
+
+export class ProxyResourceManager extends ResourceManager {
   private backendServerManager: BackendServerManager;
 
   constructor(backendServerManager: BackendServerManager) {
+    // Initialize parent class with empty resources since we're proxying to backend servers
+    super({
+      definitions: {},
+      handlers: {}
+    });
     this.backendServerManager = backendServerManager;
   }
 
@@ -56,11 +57,11 @@ export class ProxyResourceManager {
           }
         }
       } catch (error) {
-        debugLog(`Error getting resources from server ${connection.config.id}:`, error);
+        Logger.logError(error as Error, `Error getting resources from server ${connection.config.id}`, { component: getComponentName() });
       }
     }
 
-    debugLog(`ProxyResourceManager: Found ${allResources.length} total resources`);
+    Logger.debug(`ProxyResourceManager: Found ${allResources.length} total resources`, { component: getComponentName() });
 
     return {
       resources: allResources,
@@ -86,7 +87,7 @@ export class ProxyResourceManager {
     try {
       // Delegate to the backend server
       const result = await connection.client.readResource({ uri: originalUri });
-      debugLog(`ProxyResourceManager: Read resource ${uri} from server ${serverId}`);
+      Logger.debug(`ProxyResourceManager: Read resource ${uri} from server ${serverId}`, { component: getComponentName() });
       return {
         contents: [
           {
@@ -98,7 +99,7 @@ export class ProxyResourceManager {
         ]
       };
     } catch (error) {
-      debugLog(`Error reading resource ${uri} from server ${serverId}:`, error);
+      Logger.logError(error as Error, `Error reading resource ${uri} from server ${serverId}`, { component: getComponentName() });
       throw new McpError(ErrorCode.InternalError, `Failed to read resource from backend server: ${error}`);
     }
   }
@@ -124,10 +125,10 @@ export class ProxyResourceManager {
 
     try {
       // For now, just return success since subscription support varies
-      debugLog(`ProxyResourceManager: Subscribed to resource ${uri} from server ${serverId}`);
+      Logger.debug(`ProxyResourceManager: Subscribed to resource ${uri} from server ${serverId}`, { component: getComponentName() });
       return { success: true };
     } catch (error) {
-      debugLog(`Error subscribing to resource ${uri} from server ${serverId}:`, error);
+      Logger.logError(error as Error, `Error subscribing to resource ${uri} from server ${serverId}`, { component: getComponentName() });
       throw new McpError(ErrorCode.InternalError, `Failed to subscribe to resource from backend server: ${error}`);
     }
   }
@@ -153,10 +154,10 @@ export class ProxyResourceManager {
 
     try {
       // For now, just return success since subscription support varies
-      debugLog(`ProxyResourceManager: Unsubscribed from resource ${uri} from server ${serverId}`);
+      Logger.debug(`ProxyResourceManager: Unsubscribed from resource ${uri} from server ${serverId}`, { component: getComponentName() });
       return { success: true };
     } catch (error) {
-      debugLog(`Error unsubscribing from resource ${uri} from server ${serverId}:`, error);
+      Logger.logError(error as Error, `Error unsubscribing from resource ${uri} from server ${serverId}`, { component: getComponentName() });
       throw new McpError(ErrorCode.InternalError, `Failed to unsubscribe from resource from backend server: ${error}`);
     }
   }

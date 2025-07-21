@@ -1,14 +1,11 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
+import { Logger } from 'utils/logging';
+import { BackendServerManager } from './backend-server-manager.js';
+// Component name for logging
+function getComponentName() {
+  return "proxy-prompt-manager";
 }
 
-import { BackendServerManager } from './backend-server-manager.js';
+import { PromptManager } from './prompt-manager.js';
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 
 export interface ProxyPromptDefinition {
@@ -21,10 +18,15 @@ export interface ProxyPromptDefinition {
   }>;
 }
 
-export class ProxyPromptManager {
+export class ProxyPromptManager extends PromptManager {
   private backendServerManager: BackendServerManager;
 
   constructor(backendServerManager: BackendServerManager) {
+    // Initialize parent class with empty prompts since we're proxying to backend servers
+    super({
+      definitions: {},
+      handlers: {}
+    });
     this.backendServerManager = backendServerManager;
   }
 
@@ -59,11 +61,11 @@ export class ProxyPromptManager {
           }
         }
       } catch (error) {
-        debugLog(`Error getting prompts from server ${connection.config.id}:`, error);
+        Logger.logError(error as Error, `Error getting prompts from server ${connection.config.id}`, { component: getComponentName() });
       }
     }
 
-    debugLog(`ProxyPromptManager: Found ${allPrompts.length} total prompts`);
+    Logger.debug(`ProxyPromptManager: Found ${allPrompts.length} total prompts`, { component: getComponentName() });
 
     return {
       prompts: allPrompts,
@@ -71,7 +73,7 @@ export class ProxyPromptManager {
   }
 
   async getPrompt(request: { params: { name: string; arguments?: Record<string, string> } }): Promise<any> {
-    const name = request.params.name;
+    const { name } = request.params;
     
     // Check if this is a prefixed name from a backend server
     const match = name.match(/^([^_]+)__(.+)$/);
@@ -92,10 +94,10 @@ export class ProxyPromptManager {
         name: originalName, 
         arguments: request.params.arguments 
       });
-      debugLog(`ProxyPromptManager: Got prompt ${name} from server ${serverId}`);
+      Logger.debug(`ProxyPromptManager: Got prompt ${name} from server ${serverId}`, { component: getComponentName() });
       return result;
     } catch (error) {
-      debugLog(`Error getting prompt ${name} from server ${serverId}:`, error);
+      Logger.logError(error as Error, `Error getting prompt ${name} from server ${serverId}`, { component: getComponentName() });
       throw new McpError(ErrorCode.InternalError, `Failed to get prompt from backend server: ${error}`);
     }
   }

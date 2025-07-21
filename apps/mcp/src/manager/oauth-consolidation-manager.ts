@@ -19,16 +19,13 @@ import {
   OAuthMetadata 
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { BackendServerConfig } from "../types.js";
+import { Logger } from '../utils/logging.js';
 
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
+function getComponentName() {
+  return "OAuthConsolidationManager";
 }
+
+
 
 export interface ConsolidatedOAuthRequirement {
   serverId: string;
@@ -123,14 +120,14 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     };
 
     await this._clientsStore.storeClient(defaultClient);
-    debugLog(`🔐 Initialized consolidated OAuth client: ${defaultClient.client_id}`);
+    Logger.info(`Initialized consolidated OAuth client: ${defaultClient.client_id}`, { component: getComponentName() });
   }
 
   /**
    * Register an OAuth requirement from a backend server
    */
   async registerOAuthRequirement(serverId: string, config: BackendServerConfig, error?: string): Promise<boolean> {
-    debugLog(`🔐 Registering OAuth requirement for server: ${serverId} (${config.name})`);
+    Logger.debug(`Registering OAuth requirement for server: ${serverId} (${config.name})`, { component: getComponentName() });
 
     const scopes = this.determineRequiredScopes(config, error);
     const urls = this.buildOAuthUrls(config);
@@ -150,7 +147,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     };
 
     this.oauthRequirements.set(serverId, requirement);
-    debugLog(`✅ OAuth requirement registered for ${serverId}: scopes=${scopes.join(', ')}`);
+    Logger.debug(`OAuth requirement registered for ${serverId}: scopes=${scopes.join(', ')}`, { component: getComponentName() });
     return true;
   }
 
@@ -178,14 +175,14 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
    * Force OAuth detection for known OAuth-enabled servers
    */
   async forceOAuthDetection(serverConfigs: BackendServerConfig[]): Promise<void> {
-    debugLog("🔍 Force detecting OAuth requirements for all servers...");
+    Logger.debug("Force detecting OAuth requirements for all servers...", { component: getComponentName() });
 
     for (const config of serverConfigs) {
-      if (!config.enabled) continue;
+      if (!config.enabled) {continue};
 
       // Force OAuth for known OAuth-enabled servers
       if (this.isKnownOAuthServer(config)) {
-        debugLog(`🔐 Force enabling OAuth for known server: ${config.id}`);
+        Logger.debug(`Force enabling OAuth for known server: ${config.id}`, { component: getComponentName() });
         await this.registerOAuthRequirement(
           config.id, 
           config, 
@@ -371,7 +368,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
   // Implementation of OAuthServerProvider interface
 
   async authorize(client: OAuthClientInformationFull, params: AuthorizationParams, res: Response): Promise<void> {
-    debugLog(`🔐 Starting consolidated OAuth authorization for client: ${client.client_id}`);
+    Logger.info(`Starting consolidated OAuth authorization for client: ${client.client_id}`, { component: getComponentName() });
     
     // Store the code challenge for later verification
     if (params.codeChallenge) {
@@ -391,7 +388,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
       authUrl.searchParams.set('code_challenge_method', 'S256'); // Default to S256
     }
 
-    debugLog(`🔐 Redirecting to consolidated OAuth: ${authUrl.toString()}`);
+    Logger.debug(`Redirecting to consolidated OAuth: ${authUrl.toString()}`, { component: getComponentName() });
     res.redirect(authUrl.toString());
   }
 
@@ -412,7 +409,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     redirectUri?: string,
     resource?: URL
   ): Promise<OAuthTokens> {
-    debugLog(`🔐 Exchanging consolidated authorization code for tokens`);
+    Logger.debug(`Exchanging consolidated authorization code for tokens`, { component: getComponentName() });
 
     // In a real implementation, this would exchange the consolidated auth code
     // for tokens from all backend servers. For now, we'll create a master token.
@@ -432,7 +429,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
         );
         serverTokens.push(backendTokens);
       } catch (error) {
-        debugLog(`❌ Failed to exchange tokens with ${requirement.serverId}:`, error);
+        Logger.logError(error as Error, `Failed to exchange tokens with ${requirement.serverId}`, { component: getComponentName() });
         // Continue with other servers even if one fails
       }
     }
@@ -458,7 +455,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     codeVerifier?: string,
     redirectUri?: string
   ): Promise<ConsolidatedToken> {
-    debugLog(`🔗 Exchanging tokens with backend server: ${requirement.serverId}`);
+    Logger.debug(`Exchanging tokens with backend server: ${requirement.serverId}`, { component: getComponentName() });
 
     if (this.isGitHubMcpServer(requirement.config)) {
       return await this.exchangeGitHubTokens(requirement, authorizationCode, redirectUri);
@@ -550,7 +547,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     scopes?: string[],
     resource?: URL
   ): Promise<OAuthTokens> {
-    debugLog(`🔄 Refreshing consolidated tokens for client: ${client.client_id}`);
+    Logger.debug(`Refreshing consolidated tokens for client: ${client.client_id}`, { component: getComponentName() });
 
     // Refresh tokens with all backend servers
     const serverTokens = this.activeTokens.get(client.client_id) || [];
@@ -565,7 +562,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
             refreshedTokens.push(refreshed);
           }
         } catch (error) {
-          debugLog(`❌ Failed to refresh token for ${serverToken.serverId}:`, error);
+          Logger.logError(error as Error, `Failed to refresh token for ${serverToken.serverId}`, { component: getComponentName() });
           // Keep the original token if refresh fails
           refreshedTokens.push(serverToken);
         }
@@ -632,7 +629,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    debugLog(`🔍 Verifying consolidated access token`);
+    Logger.debug(`Verifying consolidated access token`, { component: getComponentName() });
 
     // Find the client that has this token
     for (const [clientId, serverTokens] of this.activeTokens.entries()) {
@@ -657,7 +654,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
   }
 
   async revokeToken(client: OAuthClientInformationFull, request: OAuthTokenRevocationRequest): Promise<void> {
-    debugLog(`🗑️ Revoking consolidated tokens for client: ${client.client_id}`);
+    Logger.debug(`Revoking consolidated tokens for client: ${client.client_id}`, { component: getComponentName() });
 
     // Revoke tokens with all backend servers
     const serverTokens = this.activeTokens.get(client.client_id) || [];
@@ -669,7 +666,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
           await this.revokeBackendToken(requirement, serverToken);
         }
       } catch (error) {
-        debugLog(`❌ Failed to revoke token for ${serverToken.serverId}:`, error);
+        Logger.logError(error as Error, `Failed to revoke token for ${serverToken.serverId}`, { component: getComponentName() });
         // Continue revoking other tokens even if one fails
       }
     }
@@ -685,7 +682,7 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
     requirement: ConsolidatedOAuthRequirement,
     serverToken: ConsolidatedToken
   ): Promise<void> {
-    if (!requirement.revocationUrl) return;
+    if (!requirement.revocationUrl) {return};
 
     const response = await fetch(requirement.revocationUrl, {
       method: 'POST',

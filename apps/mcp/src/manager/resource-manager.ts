@@ -1,14 +1,11 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
 // ResourceManager handles resource logic for McpServer
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { Logger } from "utils/logging";
+// Component name for logging
+function getComponentName() {
+  return "resource-manager";
+}
+
 
 export interface ResourceDefinition {
   uri: string;
@@ -169,7 +166,7 @@ export class ResourceManager {
       if (uris.has(uri)) {
         // Here you would send the notification to the specific session
         // This would be handled by the server transport layer
-        debugLog(`Resource ${uri} changed for session ${sessionId}`, content);
+        Logger.debug(`Resource ${uri} changed for session ${sessionId}`, { component: getComponentName() });
       }
     }
   }

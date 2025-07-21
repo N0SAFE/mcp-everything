@@ -1,14 +1,11 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
 // PromptManager handles prompt logic for McpServer
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
+import { Logger } from "utils/logging";
+// Component name for logging
+function getComponentName() {
+  return "prompt-manager";
+}
+
 
 export interface PromptDefinition {
   name: string;
@@ -130,7 +127,7 @@ export class PromptManager {
         },
       };
     } catch (error) {
-      debugLog(`Completion error for prompt ${ref.name}:`, error);
+      Logger.error(`Completion error for prompt ${ref.name}:`, { component: getComponentName() });
       return { completion: { values: [] } };
     }
   }

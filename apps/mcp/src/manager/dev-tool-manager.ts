@@ -1,14 +1,6 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
 // Development tools manager - only active in development mode
 import { ToolCapability } from "../types.js";
+import { Logger } from "../utils/logging.js";
 import { createToolDefinition } from "../utils/tools.js";
 import { z } from "zod";
 import { BackendServerManager, FailedServerAttempt } from "./backend-server-manager.js";
@@ -85,7 +77,7 @@ export class DevToolManager {
 
   private setupErrorHandlers() {
     // Capture console errors and warnings
-    const originalConsoleError = debugLog;
+    const originalConsoleError = console.error;
     const originalConsoleWarn = console.warn;
     
     console.error = (...args) => {

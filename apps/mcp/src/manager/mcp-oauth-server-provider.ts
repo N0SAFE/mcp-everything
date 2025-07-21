@@ -1,23 +1,15 @@
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.MCP_DEBUG === "true" || process.env.NODE_ENV === "development";
-
-// Debug logging function that only outputs when debug is enabled
-function debugLog(...args: any[]) {
-  if (DEBUG_ENABLED) {
-    console.error(...args);
-  }
-}
-/**
- * MCP OAuth Server Provider - Implements OAuth for MCP servers according to specification
- * https://modelcontextprotocol.io/specification/draft/basic/authorization
- */
-
 import { Response } from "express";
 import { OAuthServerProvider, AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { BackendServerConfig } from "../types.js";
+import { Logger } from "../utils/logging.js";
+
+// Component name for logging
+function getComponentName() {
+  return "mcp-oauth-server-provider";
+}
 
 export interface McpOAuthServerInfo {
   serverId: string;
@@ -77,7 +69,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
    * Register an OAuth-enabled backend server
    */
   async registerServer(serverId: string, config: BackendServerConfig): Promise<void> {
-    debugLog(`🔐 Registering OAuth server: ${serverId} (${config.name})`);
+    Logger.info(`🔐 Registering OAuth server: ${serverId} (${config.name})`, { component: getComponentName() });
     
     // Create a dedicated client store for this server
     const clientStore = new InMemoryClientStore();
@@ -109,7 +101,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
     };
     
     this.oauthServers.set(serverId, serverInfo);
-    debugLog(`✅ OAuth server registered: ${serverId}`);
+    Logger.info(`✅ OAuth server registered: ${serverId}`, { component: getComponentName() });
   }
 
   /**
