@@ -2,7 +2,7 @@
 import { ToolCapability } from "../types.js";
 import { createToolDefinition } from "../utils/tools.js";
 import { z } from "zod";
-import { BackendServerManager } from "./backend-server-manager.js";
+import { BackendServerManager, FailedServerAttempt } from "./backend-server-manager.js";
 import { ProxyToolManager } from "./proxy-tool-manager.js";
 import { ConfigurationManager } from "./configuration-manager.js";
 
@@ -230,7 +230,8 @@ export class DevToolManager {
       this.createBackendServerStatusTool(),
       this.createConnectionDiagnosticsTool(),
       this.createConfigurationDiagnosticsTool(),
-      this.createMemoryDiagnosticsTool()
+      this.createMemoryDiagnosticsTool(),
+      this.createEnvironmentDiagnosticsTool()
     ];
   }
 
@@ -646,10 +647,11 @@ export class DevToolManager {
     return {
       definition: createToolDefinition({
         name: "dev_backend_server_status",
-        description: "Get detailed status of all backend MCP servers including connection health, tool counts, and last errors. Essential for debugging backend connectivity issues.",
+        description: "Get detailed status of all backend MCP servers including connection health, tool counts, and last errors. Essential for debugging backend connectivity issues with auto-fix suggestions.",
         inputSchema: z.object({
           serverId: z.string().optional().describe("Specific server ID to check"),
-          includeConfig: z.boolean().optional().default(false).describe("Include server configuration details")
+          includeConfig: z.boolean().optional().default(false).describe("Include server configuration details"),
+          includeFixes: z.boolean().optional().default(true).describe("Include auto-fix suggestions for failed servers")
         }),
         annotations: {
           title: "Development: Backend Server Status",
@@ -659,7 +661,7 @@ export class DevToolManager {
           openWorldHint: false,
         },
       }),
-      handler: async ({ serverId, includeConfig }) => {
+      handler: async ({ serverId, includeConfig, includeFixes }) => {
         const backendConnections = this.backendServerManager.getAllConnections();
         const failedServers = this.backendServerManager.getFailedServers();
         const allServerStatuses = this.backendServerManager.getAllServerStatuses();
@@ -718,7 +720,7 @@ export class DevToolManager {
           }
         }
 
-        // Show failed servers
+        // Show failed servers with enhanced diagnostics
         if (failedServersList.length > 0) {
           statusMessage.push(`❌ Failed Servers (${failedServersList.length}):`);
           for (const server of failedServersList) {
@@ -742,10 +744,22 @@ export class DevToolManager {
               statusMessage.push(`      Transport: ${server.config.transportType}`);
               if (server.config.transportType === 'stdio' && server.config.stdio) {
                 statusMessage.push(`      Command: ${server.config.stdio.command}`);
+                if (server.config.stdio.args && server.config.stdio.args.length > 0) {
+                  statusMessage.push(`      Args: ${server.config.stdio.args.join(' ')}`);
+                }
               } else if (server.config.transportType === 'http' && server.config.http) {
                 statusMessage.push(`      URL: ${server.config.http.url}`);
               } else if (server.config.transportType === 'sse' && server.config.sse) {
                 statusMessage.push(`      URL: ${server.config.sse.url}`);
+              }
+              
+              // Add auto-fix suggestions
+              if (includeFixes) {
+                const fixes = this.generateFixSuggestions(server);
+                if (fixes.length > 0) {
+                  statusMessage.push(`      🔧 Suggested Fixes:`);
+                  fixes.forEach(fix => statusMessage.push(`         • ${fix}`));
+                }
               }
               
               statusMessage.push('');
@@ -781,6 +795,75 @@ export class DevToolManager {
         };
       }
     };
+  }
+
+  private generateFixSuggestions(server: FailedServerAttempt): string[] {
+    const fixes: string[] = [];
+    const error = server.status.lastError || '';
+    const errorLower = error.toLowerCase();
+    
+    // HTTP 401 errors (GitHub token issues)
+    if (errorLower.includes('401') || errorLower.includes('authorization')) {
+      fixes.push('Set GITHUB_TOKEN environment variable with a valid GitHub Personal Access Token');
+      fixes.push('Ensure the token has appropriate scopes (repo, read:user, etc.)');
+      fixes.push('Check if the token has expired or been revoked');
+    }
+    
+    // Connection closed errors (stdio transport issues)
+    if (errorLower.includes('connection closed') || errorLower.includes('econnreset')) {
+      if (server.config.transportType === 'stdio') {
+        fixes.push('Check if the command is installed: ' + (server.config.stdio?.command || 'unknown'));
+        if (server.config.stdio?.command === 'npx') {
+          fixes.push('Ensure npm/npx is installed and working: npm --version');
+          fixes.push('Try manually running: npx ' + (server.config.stdio?.args?.join(' ') || ''));
+          fixes.push('Check network connectivity for package downloads');
+        }
+        if (server.config.stdio?.command === 'uvx') {
+          fixes.push('Ensure uvx (uv) is installed: uvx --version');
+          fixes.push('Try manually running: uvx ' + (server.config.stdio?.args?.join(' ') || ''));
+        }
+      }
+    }
+    
+    // Network/timeout errors
+    if (errorLower.includes('timeout') || errorLower.includes('network')) {
+      fixes.push('Check internet connectivity');
+      fixes.push('Verify firewall settings are not blocking the connection');
+      fixes.push('Try increasing timeout values in configuration');
+    }
+    
+    // Permission errors
+    if (errorLower.includes('permission') || errorLower.includes('access denied')) {
+      fixes.push('Check file/directory permissions');
+      fixes.push('Ensure the process has necessary access rights');
+      fixes.push('Try running with appropriate user permissions');
+    }
+    
+    // Command not found errors
+    if (errorLower.includes('command not found') || errorLower.includes('enoent')) {
+      if (server.config.stdio?.command) {
+        fixes.push(`Install the missing command: ${server.config.stdio.command}`);
+        fixes.push(`Add the command to your PATH environment variable`);
+        fixes.push(`Verify installation with: which ${server.config.stdio.command}`);
+      }
+    }
+    
+    // Generic fallback suggestions
+    if (fixes.length === 0) {
+      fixes.push('Check server logs for more detailed error information');
+      fixes.push('Verify server configuration is correct');
+      fixes.push('Test the server independently to ensure it works');
+      
+      if (server.config.transportType === 'stdio') {
+        fixes.push('Try running the command manually to test it works');
+      } else if (server.config.transportType === 'http') {
+        fixes.push('Test the HTTP endpoint manually with curl or browser');
+      } else if (server.config.transportType === 'sse') {
+        fixes.push('Test the SSE endpoint manually');
+      }
+    }
+    
+    return fixes;
   }
 
   private createConnectionDiagnosticsTool(): ToolCapability {
@@ -1149,6 +1232,190 @@ export class DevToolManager {
         };
       }
     };
+  }
+
+  private createEnvironmentDiagnosticsTool(): ToolCapability {
+    return {
+      definition: createToolDefinition({
+        name: "dev_environment_diagnostics",
+        description: "Check environment setup, dependencies, and system requirements for backend servers. Helps diagnose missing dependencies and configuration issues.",
+        inputSchema: z.object({
+          checkCommands: z.boolean().optional().default(true).describe("Check if required commands are available"),
+          checkEnvVars: z.boolean().optional().default(true).describe("Check required environment variables"),
+          testConnectivity: z.boolean().optional().default(false).describe("Test network connectivity to external services")
+        }),
+        annotations: {
+          title: "Development: Environment Diagnostics",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      }),
+      handler: async ({ checkCommands, checkEnvVars, testConnectivity }) => {
+        const diagnosticsMessage = [
+          `🌍 Environment Diagnostics`,
+          ``,
+        ];
+
+        if (checkEnvVars) {
+          diagnosticsMessage.push(`🔑 Environment Variables:`);
+          
+          const requiredEnvVars = [
+            { name: 'GITHUB_TOKEN', description: 'Required for GitHub MCP server authentication', optional: false },
+            { name: 'BRAVE_API_KEY', description: 'Required for Brave Search server', optional: true },
+            { name: 'MCP_DEV_MODE', description: 'Enables development tools', optional: true },
+            { name: 'NODE_ENV', description: 'Node.js environment setting', optional: true },
+            { name: 'MEMORY_FILE_PATH', description: 'Path for memory server storage', optional: true }
+          ];
+
+          let envIssuesFound = 0;
+          for (const envVar of requiredEnvVars) {
+            const value = process.env[envVar.name];
+            const status = value ? '✅ Set' : (envVar.optional ? '⚠️ Missing (optional)' : '❌ Missing (required)');
+            
+            diagnosticsMessage.push(`   ${envVar.name}: ${status}`);
+            if (value && envVar.name.includes('TOKEN')) {
+              // Don't show full token, just indicate length
+              diagnosticsMessage.push(`     Value: ${value.substring(0, 8)}... (${value.length} chars)`);
+            } else if (value && envVar.name !== 'GITHUB_TOKEN') {
+              diagnosticsMessage.push(`     Value: ${value}`);
+            }
+            diagnosticsMessage.push(`     Description: ${envVar.description}`);
+            
+            if (!value && !envVar.optional) {
+              envIssuesFound++;
+              diagnosticsMessage.push(`     🔧 Fix: Set this environment variable`);
+            }
+            
+            diagnosticsMessage.push(``);
+          }
+
+          if (envIssuesFound > 0) {
+            diagnosticsMessage.push(`⚠️ Found ${envIssuesFound} missing required environment variables`, ``);
+          }
+        }
+
+        if (checkCommands) {
+          diagnosticsMessage.push(`🔧 Command Dependencies:`);
+          
+          const requiredCommands = [
+            { name: 'node', description: 'Node.js runtime', test: '--version' },
+            { name: 'npm', description: 'Node package manager', test: '--version' },
+            { name: 'npx', description: 'Node package executor', test: '--version' },
+            { name: 'uvx', description: 'UV package executor (for Python packages)', test: '--version' },
+            { name: 'python', description: 'Python runtime (for uvx packages)', test: '--version' },
+            { name: 'bun', description: 'Bun runtime (current environment)', test: '--version' }
+          ];
+
+          for (const cmd of requiredCommands) {
+            try {
+              // Try to check if command exists (simplified check)
+              const hasCommand = await this.checkCommandExists(cmd.name);
+              const status = hasCommand ? '✅ Available' : '❌ Missing';
+              
+              diagnosticsMessage.push(`   ${cmd.name}: ${status}`);
+              diagnosticsMessage.push(`     Description: ${cmd.description}`);
+              
+              if (!hasCommand) {
+                diagnosticsMessage.push(`     🔧 Fix: Install ${cmd.name} on your system`);
+              }
+              
+              diagnosticsMessage.push(``);
+            } catch (error) {
+              diagnosticsMessage.push(`   ${cmd.name}: ❓ Unknown (${error})`);
+              diagnosticsMessage.push(`     Description: ${cmd.description}`);
+              diagnosticsMessage.push(``);
+            }
+          }
+        }
+
+        if (testConnectivity) {
+          diagnosticsMessage.push(`🌐 Network Connectivity:`);
+          
+          const endpoints = [
+            { url: 'https://registry.npmjs.org', name: 'NPM Registry', description: 'Required for npx package downloads' },
+            { url: 'https://api.githubcopilot.com', name: 'GitHub Copilot API', description: 'Required for GitHub MCP server' },
+            { url: 'https://mcp.deepwiki.com', name: 'DeepWiki MCP', description: 'Required for DeepWiki server' }
+          ];
+
+          for (const endpoint of endpoints) {
+            try {
+              const start = Date.now();
+              const response = await fetch(endpoint.url, { 
+                method: 'HEAD', 
+                signal: AbortSignal.timeout(5000) 
+              });
+              const duration = Date.now() - start;
+              const status = response.ok ? `✅ Reachable (${duration}ms)` : `⚠️ Reachable but HTTP ${response.status}`;
+              
+              diagnosticsMessage.push(`   ${endpoint.name}: ${status}`);
+              diagnosticsMessage.push(`     URL: ${endpoint.url}`);
+              diagnosticsMessage.push(`     Description: ${endpoint.description}`);
+              diagnosticsMessage.push(``);
+            } catch (error) {
+              diagnosticsMessage.push(`   ${endpoint.name}: ❌ Unreachable`);
+              diagnosticsMessage.push(`     URL: ${endpoint.url}`);
+              diagnosticsMessage.push(`     Error: ${error instanceof Error ? error.message : String(error)}`);
+              diagnosticsMessage.push(`     Description: ${endpoint.description}`);
+              diagnosticsMessage.push(`     🔧 Fix: Check internet connection and firewall settings`);
+              diagnosticsMessage.push(``);
+            }
+          }
+        }
+
+        // System information
+        diagnosticsMessage.push(
+          `💻 System Information:`,
+          `   Platform: ${process.platform}`,
+          `   Architecture: ${process.arch}`,
+          `   Node.js Version: ${process.version}`,
+          `   Working Directory: ${process.cwd()}`,
+          `   Process ID: ${process.pid}`,
+          `   Memory Usage: ${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`,
+          ``
+        );
+
+        // Auto-fix recommendations summary
+        diagnosticsMessage.push(
+          `🔧 Quick Fix Commands:`,
+          `   Install missing dependencies: npm install -g npx`,
+          `   Set GitHub token: export GITHUB_TOKEN=your_token_here`,
+          `   Enable dev mode: export MCP_DEV_MODE=true`,
+          `   Install UV for Python packages: curl -LsSf https://astral.sh/uv/install.sh | sh`,
+          ``
+        );
+
+        return {
+          content: [{
+            type: "text",
+            text: diagnosticsMessage.join('\n')
+          }]
+        };
+      }
+    };
+  }
+
+  private async checkCommandExists(command: string): Promise<boolean> {
+    try {
+      // Use which command on Unix-like systems, where on Windows
+      const whichCommand = process.platform === 'win32' ? 'where' : 'which';
+      const { spawn } = await import('child_process');
+      
+      return new Promise((resolve) => {
+        const proc = spawn(whichCommand, [command], { stdio: 'ignore' });
+        proc.on('close', (code) => resolve(code === 0));
+        proc.on('error', () => resolve(false));
+        
+        // Timeout after 2 seconds
+        setTimeout(() => {
+          proc.kill();
+          resolve(false);
+        }, 2000);
+      });
+    } catch {
+      return false;
+    }
   }
 
   private calculateMemoryTrend(metrics: PerformanceMetrics[]): number {
