@@ -30,7 +30,7 @@ export class McpServer {
   private readonly toolManager: ToolManager;
   private readonly resourceManager: ResourceManager;
   private readonly promptManager: PromptManager;
-  private oauthProvider?: OAuthServerProvider;
+  oauthProvider?: OAuthServerProvider;
 
   constructor({
     name,

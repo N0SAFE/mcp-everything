@@ -162,6 +162,7 @@ services:
     environment:
       - NODE_ENV=development
       - MCP_PROXY_CONFIG_PATH=./mcp-proxy-config.json
+      - MCP_DEV_MODE=true
       - MCP_INSPECTOR_PORT=3001
       # Enable hot reloading
       - WATCHPACK_POLLING=true

@@ -8,7 +8,6 @@ import { McpOAuthServerProvider } from "./mcp-oauth-server-provider.js";
 import {
   ToolsetConfig,
   DynamicToolDiscoveryOptions,
-  ProxyServerConfig,
 } from "../types.js";
 import { createTool, createToolDefinition } from "../utils/tools.js";
 import { z } from "zod";
@@ -217,7 +216,10 @@ ${instructions || ""}`;
       capabilities: {
         tools: allTools,
       },
+      toolsetConfig,
+      dynamicToolDiscovery,
       instructions: proxyInstructions,
+      oauthProvider: mcpOAuthProvider,
     });
 
     this.configurationManager = configMgr;
@@ -818,9 +820,5 @@ ${instructions || ""}`;
 
   get serverCreator() {
     return this.dynamicServerCreator;
-  }
-
-  get oauthProvider() {
-    return this.mcpOAuthProvider;
   }
 }

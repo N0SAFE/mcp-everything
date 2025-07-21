@@ -248,7 +248,7 @@
           "list_notifications",
           "mark_notifications_read"
         ],
-        "requireAuth": false
+        "requireAuth": true
       }
     },
     {
