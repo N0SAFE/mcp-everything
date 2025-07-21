@@ -685,7 +685,7 @@ export class DevToolManager {
           'client' in server && server.status.connected
         );
         const failedServersList = serversToCheck.filter(server => 
-          'attemptCount' in server && !server.config.enabled !== false
+          'attemptCount' in server && server.config.enabled !== false
         );
         const disabledServers = serversToCheck.filter(server => 
           'attemptCount' in server && server.config.enabled === false
