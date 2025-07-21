@@ -18,25 +18,40 @@ export class ConfigurationManager {
   private configPath: string;
 
   constructor(configPath?: string) {
-    this.configPath = configPath || process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json";
+    this.configPath = configPath || process.env.MCP_PROXY_CONFIG_PATH || path.resolve(__dirname, "../../mcp-proxy-config.json");
+    console.error(`DEBUG: Configuration path: ${this.configPath}`);
+    console.error(`DEBUG: Current working directory: ${process.cwd()}`);
+    console.error(`DEBUG: File exists: ${fs.existsSync(this.configPath)}`);
     this.config = this.loadConfiguration();
+    console.error(`DEBUG: Loaded ${this.config.servers?.length || 0} servers`);
   }
 
   private loadConfiguration(): ProxyServerConfig {
-    try {
-      if (fs.existsSync(this.configPath)) {
-        const configData = fs.readFileSync(this.configPath, "utf-8");
-        const parsed = JSON.parse(configData);
-        return this.validateAndNormalizeConfig(parsed);
-      } else {
-        debugLog(`Configuration file not found at ${this.configPath}, using default configuration`);
-        return this.getDefaultConfiguration();
+    const possiblePaths = [
+      this.configPath,
+      path.resolve(__dirname, "../../mcp-proxy-config-enhanced-mimicked.json"),
+      path.resolve(__dirname, "../../mcp-proxy-config.json"),
+      "./mcp-proxy-config.json"
+    ];
+
+    for (const configPath of possiblePaths) {
+      try {
+        if (fs.existsSync(configPath)) {
+          console.error(`DEBUG: Trying config path: ${configPath}`);
+          const configData = fs.readFileSync(configPath, "utf-8");
+          const parsed = JSON.parse(configData);
+          const validated = this.validateAndNormalizeConfig(parsed);
+          console.error(`DEBUG: Successfully loaded ${validated.servers.length} servers from ${configPath}`);
+          return validated;
+        }
+      } catch (error) {
+        console.error(`DEBUG: Error loading configuration from ${configPath}:`, error);
+        continue;
       }
-    } catch (error) {
-      debugLog(`Error loading configuration from ${this.configPath}:`, error);
-      debugLog("Using default configuration");
-      return this.getDefaultConfiguration();
     }
+    
+    console.error(`DEBUG: No configuration file found, using default configuration`);
+    return this.getDefaultConfiguration();
   }
 
   private validateAndNormalizeConfig(config: any): ProxyServerConfig {

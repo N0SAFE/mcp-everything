@@ -1,4 +1,5 @@
 {
+  "_comment": "Enhanced MCP Proxy Configuration - Mimicking Claude Desktop MCP config with additional cool servers and discovery mode enabled",
   "servers": [
     {
       "id": "context7",
@@ -11,15 +12,20 @@
         "args": [
           "-y",
           "@upstash/context7-mcp@latest"
-        ]
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        }
       },
       "security": {
         "allowedTools": [
           "get-library-docs",
           "resolve-library-id"
         ],
-        "requireAuth": false
-      }
+        "requireAuth": false,
+        "allowedScopes": ["docs:read"]
+      },
+      "gallery": true
     },
     {
       "id": "maven-deps-server",
@@ -31,15 +37,20 @@
         "command": "npx",
         "args": [
           "mcp-maven-deps"
-        ]
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        }
       },
       "security": {
         "allowedTools": [
           "check_maven_version_exists",
           "get_maven_latest_version"
         ],
-        "requireAuth": false
-      }
+        "requireAuth": false,
+        "allowedScopes": ["maven:read"]
+      },
+      "version": "0.0.1"
     },
     {
       "id": "markitdown",
@@ -51,23 +62,33 @@
         "command": "uvx",
         "args": [
           "markitdown-mcp"
-        ]
+        ],
+        "env": {
+          "PYTHONPATH": "."
+        }
       },
       "security": {
         "allowedTools": [
           "convert_to_markdown"
         ],
-        "requireAuth": false
-      }
+        "requireAuth": false,
+        "allowedScopes": ["convert:read"]
+      },
+      "gallery": true
     },
     {
       "id": "deepwiki",
       "name": "DeepWiki Knowledge Server",
       "description": "Access GitHub repository documentation and wiki content",
-      "transportType": "sse",
+      "transportType": "http",
       "enabled": true,
-      "sse": {
-        "url": "https://mcp.deepwiki.com/sse"
+      "http": {
+        "url": "https://mcp.deepwiki.com/sse",
+        "headers": {
+          "Accept": "application/json",
+          "User-Agent": "MCP-Proxy/1.0.0"
+        },
+        "timeout": 30000
       },
       "security": {
         "allowedTools": [
@@ -75,8 +96,10 @@
           "read_wiki_contents", 
           "read_wiki_structure"
         ],
-        "requireAuth": false
-      }
+        "requireAuth": false,
+        "allowedScopes": ["wiki:read"]
+      },
+      "gallery": true
     },
     {
       "id": "sequentialthinking",
@@ -89,14 +112,19 @@
         "args": [
           "-y",
           "@modelcontextprotocol/server-sequential-thinking@latest"
-        ]
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        }
       },
       "security": {
         "allowedTools": [
           "sequentialthinking"
         ],
-        "requireAuth": false
-      }
+        "requireAuth": false,
+        "allowedScopes": ["thinking:execute"]
+      },
+      "gallery": true
     },
     {
       "id": "memory",
@@ -111,7 +139,8 @@
           "@modelcontextprotocol/server-memory@latest"
         ],
         "env": {
-          "MEMORY_FILE_PATH": "./memory.json"
+          "MEMORY_FILE_PATH": "${input:memory_file_path}",
+          "NODE_ENV": "production"
         }
       },
       "security": {
@@ -126,7 +155,47 @@
           "search_nodes",
           "open_nodes"
         ],
-        "requireAuth": false
+        "requireAuth": false,
+        "allowedScopes": ["memory:read", "memory:write"]
+      },
+      "gallery": true
+    },
+    {
+      "id": "directus",
+      "name": "Directus Headless CMS",
+      "description": "Complete Directus CMS integration for content management and database operations",
+      "transportType": "stdio",
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "mcp-server-directus@latest"
+        ],
+        "env": {
+          "DIRECTUS_URL": "${input:directus_url}",
+          "DIRECTUS_TOKEN": "${input:directus_token}",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "read_collections",
+          "read_items",
+          "read_item",
+          "create_item",
+          "update_item",
+          "delete_item",
+          "get_fields",
+          "get_files",
+          "send_email"
+        ],
+        "blockedTools": [
+          "delete_user",
+          "delete_role"
+        ],
+        "requireAuth": true,
+        "allowedScopes": ["directus:read", "directus:write"]
       }
     },
     {
@@ -140,13 +209,95 @@
         "args": [
           "-y",
           "@mateusribeirocampos/npm-mcp-server@latest"
-        ]
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        }
       },
       "security": {
         "allowedTools": [
-          "searchNpmPackage"
+          "searchNpmPackage",
+          "get_npm_package_summary",
+          "get_npm_package_versions",
+          "get_npm_package_downloads"
         ],
-        "requireAuth": false
+        "requireAuth": false,
+        "allowedScopes": ["npm:read"]
+      },
+      "gallery": true
+    },
+    {
+      "id": "cloudflare",
+      "name": "Cloudflare Platform Integration",
+      "description": "Comprehensive Cloudflare services integration for Workers, KV, R2, D1, and more",
+      "transportType": "stdio", 
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@cloudflare/mcp-server-cloudflare@latest"
+        ],
+        "env": {
+          "CLOUDFLARE_API_TOKEN": "${input:cloudflare_api_token}",
+          "CLOUDFLARE_ACCOUNT_ID": "${input:cloudflare_account_id}",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "kv_list",
+          "kv_get",
+          "kv_put",
+          "r2_list",
+          "r2_get",
+          "r2_put",
+          "d1_query",
+          "workers_list",
+          "workers_deploy"
+        ],
+        "blockedTools": [
+          "kv_delete",
+          "r2_delete",
+          "workers_delete"
+        ],
+        "requireAuth": true,
+        "allowedScopes": ["cloudflare:read", "cloudflare:write"]
+      }
+    },
+    {
+      "id": "linear",
+      "name": "Linear Project Management",
+      "description": "Linear integration for issue tracking and project management",
+      "transportType": "stdio",
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "linear-mcp-server@latest"
+        ],
+        "env": {
+          "LINEAR_API_KEY": "${input:linear_api_key}",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "create_issue",
+          "update_issue",
+          "search_issues",
+          "get_issue",
+          "comment_issue",
+          "list_teams",
+          "list_projects"
+        ],
+        "blockedTools": [
+          "delete_issue",
+          "delete_project"
+        ],
+        "requireAuth": true,
+        "allowedScopes": ["linear:read", "linear:write"]
       }
     },
     {
@@ -161,7 +312,10 @@
           "-y",
           "@modelcontextprotocol/server-filesystem@latest",
           "."
-        ]
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        }
       },
       "security": {
         "allowedTools": [
@@ -175,8 +329,10 @@
           "delete_file",
           "move_file"
         ],
-        "requireAuth": false
-      }
+        "requireAuth": false,
+        "allowedScopes": ["filesystem:read", "filesystem:write"]
+      },
+      "gallery": true
     },
     {
       "id": "git",
@@ -190,7 +346,11 @@
           "-y",
           "@modelcontextprotocol/server-git@latest",
           "."
-        ]
+        ],
+        "env": {
+          "GIT_CONFIG_GLOBAL": "/dev/null",
+          "NODE_ENV": "production"
+        }
       },
       "security": {
         "allowedTools": [
@@ -209,47 +369,10 @@
           "git_rebase",
           "git_commit"
         ],
-        "requireAuth": false
-      }
-    },
-    {
-      "id": "github",
-      "name": "GitHub MCP Server (Remote)",
-      "description": "GitHub repository management, issues, PRs, code analysis, and workflow automation via remote server",
-      "transportType": "http",
-      "enabled": true,
-      "http": {
-        "url": "https://api.githubcopilot.com/mcp/",
-        "headers": {
-          "Authorization": "Bearer ${GITHUB_TOKEN}"
-        },
-        "timeout": 30000
+        "requireAuth": false,
+        "allowedScopes": ["git:read"]
       },
-      "security": {
-        "allowedTools": [
-          "get_repo",
-          "list_repos", 
-          "get_file_contents",
-          "search_repositories",
-          "search_code",
-          "list_issues",
-          "get_issue",
-          "create_issue",
-          "update_issue",
-          "list_pull_requests",
-          "get_pull_request",
-          "create_pull_request",
-          "list_commits",
-          "get_commit",
-          "list_branches",
-          "create_branch",
-          "get_workflow_runs",
-          "get_workflow_run",
-          "list_notifications",
-          "mark_notifications_read"
-        ],
-        "requireAuth": true
-      }
+      "gallery": true
     },
     {
       "id": "brave-search",
@@ -264,18 +387,275 @@
           "@modelcontextprotocol/server-brave-search@latest"
         ],
         "env": {
-          "BRAVE_API_KEY": "demo-api-key"
+          "BRAVE_API_KEY": "${input:brave_api_key}",
+          "SEARCH_REGION": "US",
+          "NODE_ENV": "production"
         }
       },
       "security": {
         "allowedTools": [
           "brave_web_search"
         ],
-        "requireAuth": false
+        "requireAuth": false,
+        "allowedScopes": ["search:web"]
+      },
+      "gallery": true
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL Database",
+      "description": "PostgreSQL database query and schema inspection",
+      "transportType": "stdio",
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-postgres@latest"
+        ],
+        "env": {
+          "POSTGRES_CONNECTION_STRING": "${input:postgres_connection_string}",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "query",
+          "list_tables",
+          "describe_table",
+          "list_schemas"
+        ],
+        "blockedTools": [
+          "execute",
+          "insert",
+          "update",
+          "delete",
+          "drop_table",
+          "create_table"
+        ],
+        "requireAuth": true,
+        "allowedScopes": ["database:read"]
+      },
+      "gallery": true
+    },
+    {
+      "id": "slack",
+      "name": "Slack Integration",
+      "description": "Slack messaging and workspace integration",
+      "transportType": "stdio",
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-slack@latest"
+        ],
+        "env": {
+          "SLACK_BOT_TOKEN": "${input:slack_bot_token}",
+          "SLACK_SIGNING_SECRET": "${input:slack_signing_secret}",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "list_channels",
+          "send_message",
+          "get_channel_history",
+          "get_user_info"
+        ],
+        "blockedTools": [
+          "delete_message",
+          "archive_channel",
+          "kick_user"
+        ],
+        "requireAuth": true,
+        "allowedScopes": ["slack:read", "slack:write"]
+      },
+      "gallery": true
+    },
+    {
+      "id": "weather",
+      "name": "Weather Information",
+      "description": "Weather data and forecasts from multiple providers",
+      "transportType": "stdio",
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-weather@latest"
+        ],
+        "env": {
+          "WEATHER_API_KEY": "${input:weather_api_key}",
+          "WEATHER_PROVIDER": "openweathermap",
+          "UNITS": "metric",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "get_weather",
+          "get_forecast",
+          "get_historical_weather"
+        ],
+        "requireAuth": false,
+        "allowedScopes": ["weather:read"]
+      },
+      "gallery": true
+    },
+    {
+      "id": "jira",
+      "name": "JIRA Project Management",
+      "description": "Atlassian JIRA integration for issue tracking and project management",
+      "transportType": "stdio",
+      "enabled": false,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "mcp-jira-server@latest"
+        ],
+        "env": {
+          "JIRA_URL": "${input:jira_url}",
+          "JIRA_EMAIL": "${input:jira_email}",
+          "JIRA_API_TOKEN": "${input:jira_api_token}",
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "create_issue",
+          "update_issue",
+          "search_issues",
+          "get_issue",
+          "add_comment",
+          "list_projects"
+        ],
+        "blockedTools": [
+          "delete_issue",
+          "delete_project"
+        ],
+        "requireAuth": true,
+        "allowedScopes": ["jira:read", "jira:write"]
+      }
+    },
+    {
+      "id": "mermaid",
+      "name": "Mermaid Diagram Generator",
+      "description": "Generate and render Mermaid diagrams and flowcharts",
+      "transportType": "stdio",
+      "enabled": true,
+      "stdio": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "mcp-server-mermaid@latest"
+        ],
+        "env": {
+          "NODE_ENV": "production"
+        }
+      },
+      "security": {
+        "allowedTools": [
+          "generate_diagram",
+          "validate_syntax",
+          "render_svg",
+          "render_png"
+        ],
+        "requireAuth": false,
+        "allowedScopes": ["diagram:generate"]
       }
     }
   ],
+  "inputs": [
+    {
+      "id": "memory_file_path",
+      "type": "promptString",
+      "description": "Path to the memory storage file",
+      "password": false,
+      "default": "./memory.json"
+    },
+    {
+      "id": "directus_url",
+      "type": "promptString", 
+      "description": "Directus instance URL (e.g., https://your-directus.com)",
+      "password": false
+    },
+    {
+      "id": "directus_token",
+      "type": "promptString",
+      "description": "Directus API token",
+      "password": true
+    },
+    {
+      "id": "cloudflare_api_token",
+      "type": "promptString",
+      "description": "Cloudflare API token",
+      "password": true
+    },
+    {
+      "id": "cloudflare_account_id", 
+      "type": "promptString",
+      "description": "Cloudflare Account ID",
+      "password": false
+    },
+    {
+      "id": "linear_api_key",
+      "type": "promptString",
+      "description": "Linear API key",
+      "password": true
+    },
+    {
+      "id": "brave_api_key",
+      "type": "promptString",
+      "description": "Brave Search API key",
+      "password": true
+    },
+    {
+      "id": "postgres_connection_string",
+      "type": "promptString",
+      "description": "PostgreSQL connection string",
+      "password": true
+    },
+    {
+      "id": "slack_bot_token",
+      "type": "promptString", 
+      "description": "Slack Bot User OAuth Token",
+      "password": true
+    },
+    {
+      "id": "slack_signing_secret",
+      "type": "promptString",
+      "description": "Slack Signing Secret",
+      "password": true
+    },
+    {
+      "id": "weather_api_key",
+      "type": "promptString",
+      "description": "Weather API key (OpenWeatherMap)",
+      "password": true
+    },
+    {
+      "id": "jira_url",
+      "type": "promptString",
+      "description": "JIRA instance URL (e.g., https://yourcompany.atlassian.net)",
+      "password": false
+    },
+    {
+      "id": "jira_email", 
+      "type": "promptString",
+      "description": "JIRA account email",
+      "password": false
+    },
+    {
+      "id": "jira_api_token",
+      "type": "promptString",
+      "description": "JIRA API token",
+      "password": true
+    }
+  ],
   "security": {
+    "globalAllowedTools": [],
     "globalBlockedTools": [
       "system_shutdown",
       "format_disk", 
@@ -283,14 +663,70 @@
       "delete_all",
       "factory_reset",
       "sudo",
-      "su"
+      "su",
+      "chmod_777",
+      "chown_root"
     ],
     "defaultRequireAuth": false,
-    "allowServerDiscovery": true
+    "allowServerDiscovery": true,
+    "rateLimit": {
+      "enabled": true,
+      "requestsPerMinute": 120,
+      "burstLimit": 30
+    },
+    "auditLogging": {
+      "enabled": true,
+      "logLevel": "info",
+      "includeSensitiveData": false
+    }
   },
   "discovery": {
     "enabled": true,
     "allowRuntimeServerAddition": true,
-    "serverMetadataExposure": "full"
+    "allowRuntimeServerRemoval": true,
+    "serverMetadataExposure": "full",
+    "cacheTTL": 300,
+    "autoRefreshCapabilities": true,
+    "healthCheckInterval": 60,
+    "enableServerHealth": true,
+    "enableCapabilityCache": true
+  },
+  "networking": {
+    "connectionTimeout": 30000,
+    "requestTimeout": 60000,
+    "reconnectAttempts": 3,
+    "reconnectDelay": 5000,
+    "keepAlive": true,
+    "enableCompression": true,
+    "maxConcurrentConnections": 50
+  },
+  "monitoring": {
+    "enabled": true,
+    "metricsEndpoint": "/metrics",
+    "healthEndpoint": "/health", 
+    "statusEndpoint": "/status",
+    "logLevel": "info",
+    "enableTracing": false,
+    "enablePerformanceMetrics": true
+  },
+  "performance": {
+    "cacheEnabled": true,
+    "cacheTTL": 300,
+    "maxConcurrentConnections": 100,
+    "connectionPoolSize": 10,
+    "enableRequestCompression": true,
+    "enableResponseCompression": true,
+    "toolExecutionTimeout": 60000
+  },
+  "development": {
+    "enableDebugMode": false,
+    "verboseLogging": false,
+    "enableCors": true,
+    "corsOrigins": [
+      "http://localhost:3000",
+      "https://yourdomain.com"
+    ],
+    "enableHotReload": false,
+    "enableDevelopmentTools": true
   }
 }
