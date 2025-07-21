@@ -299,7 +299,7 @@ export class McpHttpServerManager {
           }
           
           // Get client information
-          const client = await serverInfo.clientStore.get(client_id as string);
+          const client = await serverInfo.clientStore.getClient(client_id as string);
           if (!client) {
             return res.status(400).json({ error: 'Invalid client_id' });
           }
@@ -355,7 +355,7 @@ export class McpHttpServerManager {
         }
         
         // Get client information
-        const client = await serverInfo.clientStore.get(client_id);
+        const client = await serverInfo.clientStore.getClient(client_id);
         if (!client) {
           return res.status(400).json({ error: 'Invalid client_id' });
         }

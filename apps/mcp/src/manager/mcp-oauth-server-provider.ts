@@ -15,6 +15,36 @@ export interface McpOAuthServerInfo {
   config: BackendServerConfig;
   provider: OAuthServerProvider;
   clientStore: OAuthRegisteredClientsStore;
+  authorizationUrl?: string;
+  tokenUrl?: string;
+  revocationUrl?: string;
+  metadataUrl?: string;
+  needsOAuth?: boolean;
+  oauthDetected?: boolean;
+  lastOAuthError?: string;
+}
+
+// Simple in-memory client store implementation
+class InMemoryClientStore implements OAuthRegisteredClientsStore {
+  private clients: Map<string, OAuthClientInformationFull> = new Map();
+
+  async getClient(clientId: string): Promise<OAuthClientInformationFull | undefined> {
+    return this.clients.get(clientId);
+  }
+
+  async registerClient(client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">): Promise<OAuthClientInformationFull> {
+    const fullClient: OAuthClientInformationFull = {
+      ...client,
+      client_id: `mcp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      client_id_issued_at: Math.floor(Date.now() / 1000)
+    };
+    this.clients.set(fullClient.client_id, fullClient);
+    return fullClient;
+  }
+
+  async storeClient(client: OAuthClientInformationFull): Promise<void> {
+    this.clients.set(client.client_id, client);
+  }
 }
 
 /**
@@ -27,7 +57,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
 
   constructor(baseUrl: string = 'http://localhost:3001') {
     this.baseUrl = baseUrl;
-    this._clientsStore = new OAuthRegisteredClientsStore();
+    this._clientsStore = new InMemoryClientStore();
   }
 
   get clientsStore(): OAuthRegisteredClientsStore {
@@ -41,7 +71,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
     console.error(`🔐 Registering OAuth server: ${serverId} (${config.name})`);
     
     // Create a dedicated client store for this server
-    const clientStore = new OAuthRegisteredClientsStore();
+    const clientStore = new InMemoryClientStore();
     
     // For GitHub MCP server, register appropriate OAuth client
     if (this.isGitHubMcpServer(config)) {
@@ -58,7 +88,15 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
       serverId,
       config,
       provider: serverProvider,
-      clientStore
+      clientStore,
+      authorizationUrl: this.isGitHubMcpServer(config) ? 
+        'https://github.com/login/oauth/authorize' : undefined,
+      tokenUrl: this.isGitHubMcpServer(config) ? 
+        'https://github.com/login/oauth/access_token' : undefined,
+      metadataUrl: this.isGitHubMcpServer(config) ? 
+        'https://github.com/.well-known/oauth-authorization-server' : undefined,
+      needsOAuth: true,
+      oauthDetected: true
     };
     
     this.oauthServers.set(serverId, serverInfo);
@@ -79,13 +117,6 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
     return this.oauthServers.get(serverId);
   }
 
-  /**
-   * Get all registered OAuth servers
-   */
-  getAllOAuthServers(): McpOAuthServerInfo[] {
-    return Array.from(this.oauthServers.values());
-  }
-
   private async registerGitHubClient(clientStore: OAuthRegisteredClientsStore, serverId: string): Promise<void> {
     const clientInfo: OAuthClientInformationFull = {
       client_id: `github-mcp-${serverId}`,
@@ -100,7 +131,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
       scope: 'repo read:user read:org'
     };
     
-    await clientStore.store(clientInfo);
+    await (clientStore as InMemoryClientStore).storeClient(clientInfo);
   }
 
   private async registerGenericClient(clientStore: OAuthRegisteredClientsStore, serverId: string): Promise<void> {
@@ -116,7 +147,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
       token_endpoint_auth_method: 'client_secret_basic'
     };
     
-    await clientStore.store(clientInfo);
+    await (clientStore as InMemoryClientStore).storeClient(clientInfo);
   }
 
   private createServerProvider(serverId: string, config: BackendServerConfig): OAuthServerProvider {
@@ -220,7 +251,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
         
         return {
           token,
-          clientId: client.client_id,
+          clientId: `mcp-github-${serverId}`, // Use a constructed client ID
           scopes: ['repo', 'read:user', 'read:org'],
           extra: {
             serverId,
@@ -371,7 +402,7 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
         // For generic servers, we assume the token is valid
         return {
           token,
-          clientId: client.client_id,
+          clientId: `mcp-${serverId}`, // Use a constructed client ID
           scopes: ['read', 'write'],
           extra: {
             serverId,
@@ -447,5 +478,24 @@ export class McpOAuthServerProvider implements OAuthServerProvider {
 
   async revokeToken(client: OAuthClientInformationFull, request: OAuthTokenRevocationRequest): Promise<void> {
     throw new Error('Use server-specific OAuth provider through getOAuthServerInfo()');
+  }
+
+  // Diagnostic methods for dev tools
+  getAllOAuthServers(): McpOAuthServerInfo[] {
+    return Array.from(this.oauthServers.values());
+  }
+
+  getOAuthDiagnostics(): any {
+    return {
+      totalServers: this.oauthServers.size,
+      servers: Array.from(this.oauthServers.values()).map(server => ({
+        serverId: server.serverId,
+        name: server.config.name,
+        configured: true,
+        needsOAuth: server.needsOAuth || false,
+        oauthDetected: server.oauthDetected || false,
+        authorizationUrl: server.authorizationUrl
+      }))
+    };
   }
 }

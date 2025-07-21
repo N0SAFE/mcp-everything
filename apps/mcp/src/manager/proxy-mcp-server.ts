@@ -217,10 +217,7 @@ ${instructions || ""}`;
       capabilities: {
         tools: allTools,
       },
-      toolsetConfig,
-      dynamicToolDiscovery,
       instructions: proxyInstructions,
-      oauthProvider,
     });
 
     this.configurationManager = configMgr;

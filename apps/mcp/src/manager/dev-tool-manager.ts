@@ -1478,7 +1478,7 @@ export class DevToolManager {
         // Get OAuth diagnostics from the backend server manager
         const oauthManager = this.backendServerManager.getOAuthManager();
         const oauthDiagnostics = oauthManager.getOAuthDiagnostics();
-        const oauthServers = oauthManager.getOAuthServers();
+        const oauthServers = oauthManager.getAllOAuthServers();
 
         // Overview
         diagnosticsMessage.push(
@@ -1504,13 +1504,13 @@ export class DevToolManager {
 
           for (const server of oauthServers) {
             const statusEmoji = server.needsOAuth ? '🔐' : '✅';
-            const configuredEmoji = oauthDiagnostics.servers.find(s => s.serverId === server.serverId)?.configured ? '✅' : '❌';
+            const configuredEmoji = oauthDiagnostics.servers.find((s: any) => s.serverId === server.serverId)?.configured ? '✅' : '❌';
             
             diagnosticsMessage.push(
               `   ${statusEmoji} ${server.config.name} (${server.serverId})`,
               `      OAuth Required: ${server.needsOAuth ? 'Yes' : 'No'}`,
               `      OAuth Detected: ${server.oauthDetected ? 'Yes' : 'No'}`,
-              `      Configuration: ${configuredEmoji} ${oauthDiagnostics.servers.find(s => s.serverId === server.serverId)?.configured ? 'Active' : 'Pending'}`,
+              `      Configuration: ${configuredEmoji} ${oauthDiagnostics.servers.find((s: any) => s.serverId === server.serverId)?.configured ? 'Active' : 'Pending'}`,
               `      Transport: ${server.config.transportType}`
             );
 
@@ -1569,7 +1569,7 @@ export class DevToolManager {
           for (const server of oauthServers) {
             if (server.config.transportType === 'http' || server.config.transportType === 'sse') {
               try {
-                const metadataUrl = server.metadataUrl || server.authorizationUrl.replace('/oauth/authorize', '/.well-known/oauth-authorization-server');
+                const metadataUrl = server.metadataUrl || (server.authorizationUrl ? server.authorizationUrl.replace('/oauth/authorize', '/.well-known/oauth-authorization-server') : undefined);
                 diagnosticsMessage.push(`   Testing ${server.config.name}...`);
                 
                 // This would be implemented to actually test OAuth endpoints
