@@ -21,8 +21,17 @@ export interface BackendServerConnection {
   prompts: Map<string, any>;
 }
 
+export interface FailedServerAttempt {
+  config: BackendServerConfig;
+  status: BackendServerStatus;
+  attemptCount: number;
+  firstFailure: Date;
+  lastAttempt: Date;
+}
+
 export class BackendServerManager {
   private connections: Map<string, BackendServerConnection> = new Map();
+  private failedServers: Map<string, FailedServerAttempt> = new Map();
   private reconnectIntervals: Map<string, NodeJS.Timeout> = new Map();
   private _initialized: Promise<void>;
 
@@ -137,14 +146,39 @@ export class BackendServerManager {
       await this.loadServerCapabilities(connection);
 
       this.connections.set(config.id, connection);
+      
+      // Remove from failed servers if it was there
+      this.failedServers.delete(config.id);
+      
       console.error(`Connected to backend server: ${config.name} (${config.id})`);
     } catch (error) {
       console.error(`Failed to connect to server ${config.id}:`, error);
-      const status: BackendServerStatus = {
-        id: config.id,
-        connected: false,
-        lastError: error instanceof Error ? error.message : String(error),
-      };
+      
+      // Track failed server attempt
+      const existingFailure = this.failedServers.get(config.id);
+      const now = new Date();
+      
+      if (existingFailure) {
+        // Update existing failure record
+        existingFailure.attemptCount++;
+        existingFailure.lastAttempt = now;
+        existingFailure.status.lastError = error instanceof Error ? error.message : String(error);
+      } else {
+        // Create new failure record
+        const failedAttempt: FailedServerAttempt = {
+          config,
+          status: {
+            id: config.id,
+            connected: false,
+            lastError: error instanceof Error ? error.message : String(error),
+          },
+          attemptCount: 1,
+          firstFailure: now,
+          lastAttempt: now,
+        };
+        this.failedServers.set(config.id, failedAttempt);
+      }
+      
       this.scheduleReconnect(config);
     }
   }
@@ -228,6 +262,9 @@ export class BackendServerManager {
       this.connections.delete(serverId);
     }
 
+    // Also remove from failed servers
+    this.failedServers.delete(serverId);
+
     const interval = this.reconnectIntervals.get(serverId);
     if (interval) {
       clearInterval(interval);
@@ -241,6 +278,30 @@ export class BackendServerManager {
 
   getAllConnections(): BackendServerConnection[] {
     return Array.from(this.connections.values());
+  }
+
+  getFailedServers(): FailedServerAttempt[] {
+    return Array.from(this.failedServers.values());
+  }
+
+  getAllServerStatuses(): Array<BackendServerConnection | FailedServerAttempt> {
+    const connected = Array.from(this.connections.values());
+    const failed = Array.from(this.failedServers.values());
+    const disabled = this.serverConfigs
+      .filter(config => !config.enabled && !this.connections.has(config.id) && !this.failedServers.has(config.id))
+      .map(config => ({
+        config,
+        status: {
+          id: config.id,
+          connected: false,
+          lastError: 'Server disabled',
+        },
+        attemptCount: 0,
+        firstFailure: new Date(),
+        lastAttempt: new Date(),
+      } as FailedServerAttempt));
+    
+    return [...connected, ...failed, ...disabled];
   }
 
   getConnectedServers(): BackendServerConnection[] {

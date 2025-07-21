@@ -14,6 +14,17 @@ export interface ErrorEntry {
   message: string;
   details?: any;
   stack?: string;
+  category?: string;
+  impact?: 'low' | 'medium' | 'high' | 'critical';
+}
+
+// Interface for performance metrics
+export interface PerformanceMetrics {
+  timestamp: Date;
+  memoryUsage: NodeJS.MemoryUsage;
+  cpuUsage?: NodeJS.CpuUsage;
+  eventLoopDelay?: number;
+  requestCount?: number;
 }
 
 // Interface for server diagnostics
@@ -24,15 +35,22 @@ export interface ServerDiagnostics {
   enabledToolsCount: number;
   backendServersCount: number;
   connectedBackendServers: number;
+  failedBackendServers: number;
+  disabledBackendServers: number;
   lastError?: ErrorEntry;
   recentErrors: ErrorEntry[];
+  errorsByCategory: Record<string, number>;
+  performanceMetrics?: PerformanceMetrics[];
 }
 
 export class DevToolManager {
   private static instance: DevToolManager | null = null;
   private errorLog: ErrorEntry[] = [];
+  private performanceHistory: PerformanceMetrics[] = [];
   private maxLogEntries = 1000;
+  private maxPerformanceEntries = 100;
   private startTime = Date.now();
+  private performanceTimer?: NodeJS.Timeout;
   
   constructor(
     private backendServerManager: BackendServerManager,
@@ -47,6 +65,9 @@ export class DevToolManager {
     
     // Set up global error handlers to capture errors
     this.setupErrorHandlers();
+    
+    // Start performance monitoring
+    this.startPerformanceMonitoring();
   }
 
   static isDevModeEnabled(): boolean {
@@ -86,13 +107,19 @@ export class DevToolManager {
   }
 
   public logError(level: 'error' | 'warn' | 'info', source: string, message: string, details?: any, stack?: string) {
+    // Categorize the error
+    const category = this.categorizeError(source, message);
+    const impact = this.assessErrorImpact(level, source, message);
+    
     const entry: ErrorEntry = {
       timestamp: new Date(),
       level,
       source,
       message,
       details,
-      stack
+      stack,
+      category,
+      impact
     };
     
     this.errorLog.push(entry);
@@ -103,27 +130,90 @@ export class DevToolManager {
     }
   }
 
+  private categorizeError(source: string, message: string): string {
+    const lowerSource = source.toLowerCase();
+    const lowerMessage = message.toLowerCase();
+    
+    if (lowerSource.includes('connection') || lowerMessage.includes('connection')) return 'connection';
+    if (lowerSource.includes('tool') || lowerMessage.includes('tool')) return 'tool';
+    if (lowerSource.includes('resource') || lowerMessage.includes('resource')) return 'resource';
+    if (lowerSource.includes('config') || lowerMessage.includes('config')) return 'configuration';
+    if (lowerSource.includes('memory') || lowerMessage.includes('memory')) return 'memory';
+    if (lowerSource.includes('transport') || lowerMessage.includes('transport')) return 'transport';
+    if (lowerSource.includes('server') || lowerMessage.includes('server')) return 'server';
+    return 'general';
+  }
+
+  private assessErrorImpact(level: 'error' | 'warn' | 'info', source: string, message: string): 'low' | 'medium' | 'high' | 'critical' {
+    if (level === 'error') {
+      if (source.includes('uncaughtException') || message.includes('crash')) return 'critical';
+      if (source.includes('connection') || message.includes('failed to connect')) return 'high';
+      return 'medium';
+    }
+    if (level === 'warn') return 'low';
+    return 'low';
+  }
+
+  private startPerformanceMonitoring() {
+    // Collect performance metrics every 30 seconds
+    this.performanceTimer = setInterval(() => {
+      this.collectPerformanceMetrics();
+    }, 30000);
+  }
+
+  private collectPerformanceMetrics() {
+    const metrics: PerformanceMetrics = {
+      timestamp: new Date(),
+      memoryUsage: process.memoryUsage(),
+      cpuUsage: process.cpuUsage(),
+    };
+    
+    this.performanceHistory.push(metrics);
+    
+    // Keep only recent metrics
+    if (this.performanceHistory.length > this.maxPerformanceEntries) {
+      this.performanceHistory = this.performanceHistory.slice(-this.maxPerformanceEntries);
+    }
+  }
+
   private getServerDiagnostics(): ServerDiagnostics {
     const memoryUsage = process.memoryUsage();
     const uptime = Date.now() - this.startTime;
     const allTools = this.proxyToolManager.getAllTools();
     const enabledTools = this.proxyToolManager.getEnabledTools();
     const backendConnections = this.backendServerManager.getAllConnections();
+    const failedServers = this.backendServerManager.getFailedServers();
+    const allServerStatuses = this.backendServerManager.getAllServerStatuses();
+    
     const connectedServers = backendConnections.filter(conn => conn.status.connected);
+    const disabledServers = allServerStatuses.filter(status => 
+      'attemptCount' in status && status.config.enabled === false
+    );
     
     const recentErrors = this.errorLog
       .filter(entry => entry.level === 'error')
       .slice(-10);
+    
+    // Categorize errors
+    const errorsByCategory: Record<string, number> = {};
+    this.errorLog.forEach(error => {
+      const category = error.category || 'general';
+      errorsByCategory[category] = (errorsByCategory[category] || 0) + 1;
+    });
     
     return {
       uptime,
       memoryUsage,
       toolsCount: allTools.length,
       enabledToolsCount: enabledTools.size,
-      backendServersCount: backendConnections.length,
+      backendServersCount: allServerStatuses.length,
       connectedBackendServers: connectedServers.length,
+      failedBackendServers: failedServers.length,
+      disabledBackendServers: disabledServers.length,
       lastError: this.errorLog.filter(e => e.level === 'error').pop(),
-      recentErrors
+      recentErrors,
+      errorsByCategory,
+      performanceMetrics: this.performanceHistory.slice(-10)
     };
   }
 
@@ -169,15 +259,34 @@ export class DevToolManager {
           `⏱️  Uptime: ${Math.floor(diagnostics.uptime / 1000)}s`,
           `🧠 Memory Usage: ${Math.round(diagnostics.memoryUsage.heapUsed / 1024 / 1024)}MB heap, ${Math.round(diagnostics.memoryUsage.rss / 1024 / 1024)}MB RSS`,
           `🔧 Tools: ${diagnostics.enabledToolsCount}/${diagnostics.toolsCount} enabled`,
-          `🔗 Backend Servers: ${diagnostics.connectedBackendServers}/${diagnostics.backendServersCount} connected`,
+          `🔗 Backend Servers: ${diagnostics.connectedBackendServers}/${diagnostics.backendServersCount} total`,
+          `   ✅ Connected: ${diagnostics.connectedBackendServers}`,
+          `   ❌ Failed: ${diagnostics.failedBackendServers}`,
+          `   🚫 Disabled: ${diagnostics.disabledBackendServers}`,
           `❌ Recent Errors: ${diagnostics.recentErrors.length}`,
           ``
         ];
 
+        // Show error patterns
+        if (Object.keys(diagnostics.errorsByCategory).length > 0) {
+          statusMessage.push(`📊 Error Categories:`);
+          Object.entries(diagnostics.errorsByCategory)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 5)
+            .forEach(([category, count]) => {
+              statusMessage.push(`   ${category}: ${count} errors`);
+            });
+          statusMessage.push(``);
+        }
+
         if (diagnostics.lastError) {
+          const impact = diagnostics.lastError.impact || 'unknown';
+          const impactEmoji = impact === 'critical' ? '🚨' : impact === 'high' ? '⚠️' : impact === 'medium' ? '📋' : 'ℹ️';
           statusMessage.push(
-            `🚨 Last Error: ${diagnostics.lastError.message}`,
+            `${impactEmoji} Last Error (${impact} impact):`,
+            `   Message: ${diagnostics.lastError.message}`,
             `   Source: ${diagnostics.lastError.source}`,
+            `   Category: ${diagnostics.lastError.category || 'unknown'}`,
             `   Time: ${diagnostics.lastError.timestamp.toISOString()}`,
             ``
           );
@@ -192,6 +301,21 @@ export class DevToolManager {
             `   External: ${Math.round(diagnostics.memoryUsage.external / 1024 / 1024)}MB`,
             ``
           );
+
+          // Show performance trends if available
+          if (diagnostics.performanceMetrics && diagnostics.performanceMetrics.length > 1) {
+            const latest = diagnostics.performanceMetrics[diagnostics.performanceMetrics.length - 1];
+            const previous = diagnostics.performanceMetrics[diagnostics.performanceMetrics.length - 2];
+            const memoryTrend = latest.memoryUsage.heapUsed - previous.memoryUsage.heapUsed;
+            const trendEmoji = memoryTrend > 0 ? '📈' : memoryTrend < 0 ? '📉' : '➡️';
+            
+            statusMessage.push(
+              `📈 Performance Trends:`,
+              `   ${trendEmoji} Memory trend: ${memoryTrend > 0 ? '+' : ''}${Math.round(memoryTrend / 1024 / 1024)}MB`,
+              `   📊 Metrics history: ${diagnostics.performanceMetrics.length} samples`,
+              ``
+            );
+          }
         }
 
         return {
@@ -208,11 +332,15 @@ export class DevToolManager {
     return {
       definition: createToolDefinition({
         name: "dev_error_logs",
-        description: "Retrieve recent error logs, warnings, and diagnostic information. Use this to identify problems and issues within the server for debugging and auto-fixing.",
+        description: "Retrieve and analyze error logs, warnings, and diagnostic information with advanced filtering and pattern analysis. Provides insights into error trends, categories, and impact assessment for debugging and auto-fixing.",
         inputSchema: z.object({
           level: z.enum(['error', 'warn', 'info', 'all']).optional().default('all').describe("Filter by log level"),
           limit: z.number().min(1).max(100).optional().default(20).describe("Maximum number of entries to return"),
-          source: z.string().optional().describe("Filter by error source")
+          source: z.string().optional().describe("Filter by error source"),
+          category: z.string().optional().describe("Filter by error category (connection, tool, resource, etc.)"),
+          impact: z.enum(['low', 'medium', 'high', 'critical']).optional().describe("Filter by error impact level"),
+          since: z.string().optional().describe("Show errors since timestamp (ISO format)"),
+          analysis: z.boolean().optional().default(false).describe("Include detailed error pattern analysis")
         }),
         annotations: {
           title: "Development: Error Logs",
@@ -222,7 +350,7 @@ export class DevToolManager {
           openWorldHint: false,
         },
       }),
-      handler: async ({ level, limit, source }) => {
+      handler: async ({ level, limit, source, category, impact, since, analysis }) => {
         let filteredLogs = [...this.errorLog];
         
         // Filter by level
@@ -235,6 +363,24 @@ export class DevToolManager {
           filteredLogs = filteredLogs.filter(entry => 
             entry.source.toLowerCase().includes(source.toLowerCase())
           );
+        }
+        
+        // Filter by category
+        if (category) {
+          filteredLogs = filteredLogs.filter(entry => 
+            entry.category?.toLowerCase().includes(category.toLowerCase())
+          );
+        }
+        
+        // Filter by impact
+        if (impact) {
+          filteredLogs = filteredLogs.filter(entry => entry.impact === impact);
+        }
+        
+        // Filter by timestamp
+        if (since) {
+          const sinceDate = new Date(since);
+          filteredLogs = filteredLogs.filter(entry => entry.timestamp >= sinceDate);
         }
         
         // Sort by timestamp (newest first) and limit
@@ -252,15 +398,69 @@ export class DevToolManager {
         }
 
         const logMessage = [
-          `📋 Error Logs (${filteredLogs.length} entries)`,
-          ``,
+          `📋 Error Logs Analysis (${filteredLogs.length} entries)`,
+          ``
+        ];
+
+        // Add analysis if requested
+        if (analysis) {
+          const categoryCount: Record<string, number> = {};
+          const impactCount: Record<string, number> = {};
+          const sourceCount: Record<string, number> = {};
+          
+          filteredLogs.forEach(entry => {
+            const cat = entry.category || 'unknown';
+            const imp = entry.impact || 'unknown';
+            categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+            impactCount[imp] = (impactCount[imp] || 0) + 1;
+            sourceCount[entry.source] = (sourceCount[entry.source] || 0) + 1;
+          });
+          
+          logMessage.push(
+            `📊 Pattern Analysis:`,
+            ``,
+            `🏷️ Top Categories:`,
+            ...Object.entries(categoryCount)
+              .sort(([,a], [,b]) => b - a)
+              .slice(0, 5)
+              .map(([cat, count]) => `   ${cat}: ${count} errors`),
+            ``,
+            `🎯 Impact Distribution:`,
+            ...Object.entries(impactCount)
+              .sort(([,a], [,b]) => b - a)
+              .map(([imp, count]) => `   ${imp}: ${count} errors`),
+            ``,
+            `📍 Top Error Sources:`,
+            ...Object.entries(sourceCount)
+              .sort(([,a], [,b]) => b - a)
+              .slice(0, 5)
+              .map(([src, count]) => `   ${src}: ${count} errors`),
+            ``,
+            `📝 Detailed Log Entries:`,
+            ``
+          );
+        }
+
+        logMessage.push(
           ...filteredLogs.map(entry => {
-            const emoji = entry.level === 'error' ? '❌' : entry.level === 'warn' ? '⚠️' : 'ℹ️';
+            const levelEmoji = entry.level === 'error' ? '❌' : entry.level === 'warn' ? '⚠️' : 'ℹ️';
+            const impactEmoji = entry.impact === 'critical' ? '🚨' : 
+                              entry.impact === 'high' ? '⚠️' : 
+                              entry.impact === 'medium' ? '📋' : 'ℹ️';
+            
             const lines = [
-              `${emoji} [${entry.level.toUpperCase()}] ${entry.timestamp.toISOString()}`,
+              `${levelEmoji} [${entry.level.toUpperCase()}] ${entry.timestamp.toISOString()}`,
               `   Source: ${entry.source}`,
               `   Message: ${entry.message}`
             ];
+            
+            if (entry.category) {
+              lines.push(`   Category: ${entry.category}`);
+            }
+            
+            if (entry.impact) {
+              lines.push(`   Impact: ${impactEmoji} ${entry.impact}`);
+            }
             
             if (entry.details) {
               lines.push(`   Details: ${JSON.stringify(entry.details, null, 2)}`);
@@ -273,7 +473,7 @@ export class DevToolManager {
             return lines.join('\n');
           }),
           ``
-        ];
+        );
 
         return {
           content: [{
@@ -461,39 +661,116 @@ export class DevToolManager {
       }),
       handler: async ({ serverId, includeConfig }) => {
         const backendConnections = this.backendServerManager.getAllConnections();
-        let connectionsToCheck = backendConnections;
+        const failedServers = this.backendServerManager.getFailedServers();
+        const allServerStatuses = this.backendServerManager.getAllServerStatuses();
+        
+        let serversToCheck = allServerStatuses;
         
         if (serverId) {
-          connectionsToCheck = backendConnections.filter(conn => conn.config.id === serverId);
+          serversToCheck = allServerStatuses.filter(server => 
+            ('config' in server && server.config.id === serverId) ||
+            ('status' in server && server.status.id === serverId)
+          );
         }
 
         const statusMessage = [
           `🔗 Backend Server Status`,
           ``,
-          `📊 Overview: ${backendConnections.filter(c => c.status.connected).length}/${backendConnections.length} servers connected`,
+          `📊 Overview: ${backendConnections.length} connected, ${failedServers.length} failed, ${allServerStatuses.length} total`,
           ``
         ];
 
-        for (const connection of connectionsToCheck) {
-          const status = connection.status.connected ? '✅ Connected' : '❌ Disconnected';
-          const lastConnected = connection.status.lastConnected ? 
-            `Last connected: ${connection.status.lastConnected.toISOString()}` : 
-            'Never connected';
-          
-          statusMessage.push(
-            `📡 ${connection.config.id} - ${connection.config.name}`,
-            `   Status: ${status}`,
-            `   ${lastConnected}`,
-            `   Tools: ${connection.status.toolsCount || 'Unknown'}`,
-            `   Resources: ${connection.status.resourcesCount || 'Unknown'}`,
-            `   Prompts: ${connection.status.promptsCount || 'Unknown'}`
-          );
-          
-          if (connection.status.lastError) {
-            statusMessage.push(`   Last Error: ${connection.status.lastError}`);
+        // Group servers by status
+        const connectedServers = serversToCheck.filter(server => 
+          'client' in server && server.status.connected
+        );
+        const failedServersList = serversToCheck.filter(server => 
+          'attemptCount' in server && !server.config.enabled !== false
+        );
+        const disabledServers = serversToCheck.filter(server => 
+          'attemptCount' in server && server.config.enabled === false
+        );
+
+        // Show connected servers
+        if (connectedServers.length > 0) {
+          statusMessage.push(`✅ Connected Servers (${connectedServers.length}):`);
+          for (const server of connectedServers) {
+            if ('client' in server) {
+              const lastConnected = server.status.lastConnected ? 
+                `Connected: ${server.status.lastConnected.toISOString()}` : 
+                'Recently connected';
+              
+              statusMessage.push(
+                `   📡 ${server.config.id} - ${server.config.name}`,
+                `      Status: ✅ Connected`,
+                `      ${lastConnected}`,
+                `      Tools: ${server.status.toolsCount || 0}`,
+                `      Resources: ${server.status.resourcesCount || 0}`,
+                `      Prompts: ${server.status.promptsCount || 0}`
+              );
+              
+              if (server.config.description) {
+                statusMessage.push(`      Description: ${server.config.description}`);
+              }
+              
+              statusMessage.push('');
+            }
           }
-          
-          statusMessage.push('');
+        }
+
+        // Show failed servers
+        if (failedServersList.length > 0) {
+          statusMessage.push(`❌ Failed Servers (${failedServersList.length}):`);
+          for (const server of failedServersList) {
+            if ('attemptCount' in server) {
+              const timeSinceFirstFailure = Date.now() - server.firstFailure.getTime();
+              const timeSinceLastAttempt = Date.now() - server.lastAttempt.getTime();
+              
+              statusMessage.push(
+                `   📡 ${server.config.id} - ${server.config.name}`,
+                `      Status: ❌ Failed (${server.attemptCount} attempts)`,
+                `      First failure: ${Math.floor(timeSinceFirstFailure / 1000)}s ago`,
+                `      Last attempt: ${Math.floor(timeSinceLastAttempt / 1000)}s ago`,
+                `      Error: ${server.status.lastError || 'Unknown error'}`
+              );
+              
+              if (server.config.description) {
+                statusMessage.push(`      Description: ${server.config.description}`);
+              }
+              
+              // Show transport details for debugging
+              statusMessage.push(`      Transport: ${server.config.transportType}`);
+              if (server.config.transportType === 'stdio' && server.config.stdio) {
+                statusMessage.push(`      Command: ${server.config.stdio.command}`);
+              } else if (server.config.transportType === 'http' && server.config.http) {
+                statusMessage.push(`      URL: ${server.config.http.url}`);
+              } else if (server.config.transportType === 'sse' && server.config.sse) {
+                statusMessage.push(`      URL: ${server.config.sse.url}`);
+              }
+              
+              statusMessage.push('');
+            }
+          }
+        }
+
+        // Show disabled servers
+        if (disabledServers.length > 0) {
+          statusMessage.push(`🚫 Disabled Servers (${disabledServers.length}):`);
+          for (const server of disabledServers) {
+            if ('attemptCount' in server) {
+              statusMessage.push(
+                `   📡 ${server.config.id} - ${server.config.name}`,
+                `      Status: 🚫 Disabled`,
+                `      Transport: ${server.config.transportType}`
+              );
+              
+              if (server.config.description) {
+                statusMessage.push(`      Description: ${server.config.description}`);
+              }
+              
+              statusMessage.push('');
+            }
+          }
         }
 
         return {
@@ -695,10 +972,12 @@ export class DevToolManager {
     return {
       definition: createToolDefinition({
         name: "dev_memory_diagnostics",
-        description: "Monitor memory usage, performance metrics, and identify potential memory leaks or performance issues in the server.",
+        description: "Advanced memory usage monitoring, performance analysis, and leak detection. Includes historical trends, memory pressure analysis, and performance optimization recommendations.",
         inputSchema: z.object({
           includeGC: z.boolean().optional().default(false).describe("Include garbage collection information"),
-          benchmark: z.boolean().optional().default(false).describe("Run a quick performance benchmark")
+          benchmark: z.boolean().optional().default(false).describe("Run a quick performance benchmark"),
+          analysis: z.boolean().optional().default(true).describe("Include detailed memory analysis and recommendations"),
+          history: z.boolean().optional().default(false).describe("Show memory usage history and trends")
         }),
         annotations: {
           title: "Development: Memory Diagnostics",
@@ -708,12 +987,12 @@ export class DevToolManager {
           openWorldHint: false,
         },
       }),
-      handler: async ({ includeGC, benchmark }) => {
+      handler: async ({ includeGC, benchmark, analysis, history }) => {
         const memoryUsage = process.memoryUsage();
         const uptime = process.uptime();
         
         const diagnosticsMessage = [
-          `🧠 Memory Diagnostics`,
+          `🧠 Advanced Memory Diagnostics`,
           ``,
           `📊 Current Memory Usage:`,
           `   RSS (Resident Set Size): ${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
@@ -728,41 +1007,136 @@ export class DevToolManager {
           ``
         ];
 
-        // Memory threshold warnings
+        // Memory threshold warnings and analysis
         const heapUsagePercent = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100;
+        const warnings = [];
+        
         if (heapUsagePercent > 80) {
-          diagnosticsMessage.push(`⚠️ Warning: High heap usage (${Math.round(heapUsagePercent)}%)`, ``);
+          warnings.push(`⚠️ Critical: High heap usage (${Math.round(heapUsagePercent)}%) - Consider memory optimization`);
+        } else if (heapUsagePercent > 60) {
+          warnings.push(`⚠️ Warning: Elevated heap usage (${Math.round(heapUsagePercent)}%) - Monitor closely`);
         }
 
         if (memoryUsage.rss > 512 * 1024 * 1024) { // 512MB
-          diagnosticsMessage.push(`⚠️ Warning: High RSS usage (${Math.round(memoryUsage.rss / 1024 / 1024)}MB)`, ``);
+          warnings.push(`⚠️ Warning: High RSS usage (${Math.round(memoryUsage.rss / 1024 / 1024)}MB) - Check for memory leaks`);
+        }
+
+        if (memoryUsage.external > 100 * 1024 * 1024) { // 100MB
+          warnings.push(`⚠️ Info: High external memory usage (${Math.round(memoryUsage.external / 1024 / 1024)}MB) - Buffers/streams in use`);
+        }
+
+        if (warnings.length > 0) {
+          diagnosticsMessage.push(`🚨 Memory Alerts:`, ...warnings.map(w => `   ${w}`), ``);
+        }
+
+        // Historical analysis
+        if (history && this.performanceHistory.length > 1) {
+          diagnosticsMessage.push(`📈 Memory History Analysis:`);
+          
+          const recentMetrics = this.performanceHistory.slice(-10);
+          const memoryTrend = this.calculateMemoryTrend(recentMetrics);
+          const growthRate = this.calculateMemoryGrowthRate(recentMetrics);
+          
+          const trendEmoji = memoryTrend > 0 ? '📈' : memoryTrend < 0 ? '📉' : '➡️';
+          diagnosticsMessage.push(
+            `   ${trendEmoji} Memory trend: ${memoryTrend > 0 ? '+' : ''}${Math.round(memoryTrend / 1024 / 1024)}MB over ${recentMetrics.length} samples`,
+            `   📊 Growth rate: ${growthRate.toFixed(2)}MB/minute`,
+            `   📊 Samples collected: ${this.performanceHistory.length}`,
+            ``
+          );
+
+          // Memory leak detection
+          if (growthRate > 5) { // Growing more than 5MB per minute
+            diagnosticsMessage.push(
+              `🚨 Potential Memory Leak Detected:`,
+              `   📈 Rapid memory growth: ${growthRate.toFixed(2)}MB/minute`,
+              `   🔍 Recommendation: Investigate object retention and cleanup`,
+              ``
+            );
+          }
+        }
+
+        // Advanced analysis
+        if (analysis) {
+          diagnosticsMessage.push(
+            `🔍 Advanced Analysis:`,
+            ``
+          );
+
+          // Memory efficiency analysis
+          const efficiency = (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100;
+          if (efficiency < 30) {
+            diagnosticsMessage.push(`   ✅ Good: Low heap fragmentation (${efficiency.toFixed(1)}% used)`);
+          } else if (efficiency > 80) {
+            diagnosticsMessage.push(`   ⚠️ Poor: High heap pressure (${efficiency.toFixed(1)}% used)`);
+          } else {
+            diagnosticsMessage.push(`   📊 Normal: Moderate heap usage (${efficiency.toFixed(1)}% used)`);
+          }
+
+          // External memory analysis
+          const externalRatio = (memoryUsage.external / memoryUsage.rss) * 100;
+          if (externalRatio > 20) {
+            diagnosticsMessage.push(`   📊 High external memory ratio (${externalRatio.toFixed(1)}%) - Large buffers in use`);
+          }
+
+          // Provide recommendations
+          diagnosticsMessage.push(
+            ``,
+            `💡 Performance Recommendations:`
+          );
+
+          if (heapUsagePercent > 70) {
+            diagnosticsMessage.push(`   • Consider implementing object pooling or caching optimizations`);
+            diagnosticsMessage.push(`   • Review data structures for memory efficiency`);
+          }
+
+          if (this.errorLog.length > 500) {
+            diagnosticsMessage.push(`   • Error log has ${this.errorLog.length} entries - consider log rotation`);
+          }
+
+          const toolCount = this.proxyToolManager.getAllTools().length;
+          if (toolCount > 100) {
+            diagnosticsMessage.push(`   • High tool count (${toolCount}) - consider lazy loading`);
+          }
+
+          diagnosticsMessage.push(``);
         }
 
         // Count objects in memory (approximate)
         diagnosticsMessage.push(
           `📈 Resource Counts:`,
           `   Error log entries: ${this.errorLog.length}`,
+          `   Performance samples: ${this.performanceHistory.length}`,
           `   Backend servers: ${this.backendServerManager.getAllConnections().length}`,
+          `   Failed servers: ${this.backendServerManager.getFailedServers().length}`,
           `   Total tools: ${this.proxyToolManager.getAllTools().length}`,
           `   Enabled tools: ${this.proxyToolManager.getEnabledTools().size}`,
           ``
         );
 
         if (benchmark) {
-          // Simple performance benchmark
+          // Enhanced performance benchmark
           const start = process.hrtime.bigint();
           
-          // Perform some operations
+          // Perform various operations
           const testArray = new Array(10000).fill(0).map((_, i) => i * 2);
           const sum = testArray.reduce((a, b) => a + b, 0);
+          
+          // Test object creation and cleanup
+          const objects = [];
+          for (let i = 0; i < 1000; i++) {
+            objects.push({ id: i, data: new Array(100).fill(i) });
+          }
           
           const end = process.hrtime.bigint();
           const duration = Number(end - start) / 1000000; // Convert to milliseconds
           
           diagnosticsMessage.push(
             `🏃 Performance Benchmark:`,
-            `   Array operation (10k elements): ${duration.toFixed(2)}ms`,
-            `   Result: ${sum}`,
+            `   Array operations (10k elements): ${duration.toFixed(2)}ms`,
+            `   Object creation (1k objects): Included in total`,
+            `   Benchmark result: ${sum}`,
+            `   Memory after benchmark: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
             ``
           );
         }
@@ -775,5 +1149,21 @@ export class DevToolManager {
         };
       }
     };
+  }
+
+  private calculateMemoryTrend(metrics: PerformanceMetrics[]): number {
+    if (metrics.length < 2) return 0;
+    const latest = metrics[metrics.length - 1];
+    const first = metrics[0];
+    return latest.memoryUsage.heapUsed - first.memoryUsage.heapUsed;
+  }
+
+  private calculateMemoryGrowthRate(metrics: PerformanceMetrics[]): number {
+    if (metrics.length < 2) return 0;
+    const latest = metrics[metrics.length - 1];
+    const first = metrics[0];
+    const timeDiff = (latest.timestamp.getTime() - first.timestamp.getTime()) / (1000 * 60); // minutes
+    const memDiff = (latest.memoryUsage.heapUsed - first.memoryUsage.heapUsed) / (1024 * 1024); // MB
+    return timeDiff > 0 ? memDiff / timeDiff : 0;
   }
 }
