@@ -114,11 +114,21 @@ export class BackendServerManager {
             command: config.stdio.command,
             args: config.stdio.args || [],
             env: config.stdio.env,
-            // Suppress stderr output when not in debug mode
-            stderr: new Stream().on("data", (data) => {
-              Logger.error(`Stdio transport stderr: ${data.toString()}`, { component: getComponentName() });
-            }),
+            // Use "pipe" to capture stderr for logging
+            stderr: "pipe",
           });
+          
+          // Set up stderr logging after transport creation
+          const stderrStream = transport.stderr;
+          if (stderrStream) {
+            stderrStream.on("data", (data) => {
+              Logger.error(`Server ${config.id} stderr: ${data.toString().trim()}`, { 
+                component: getComponentName(),
+                serverId: config.id,
+                serverName: config.name
+              });
+            });
+          }
           break;
         case "http":
           if (!config.http) {

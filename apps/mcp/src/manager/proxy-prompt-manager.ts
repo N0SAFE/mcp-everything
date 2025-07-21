@@ -1,4 +1,4 @@
-import { Logger } from 'utils/logging';
+import { Logger } from '../utils/logging.js';
 import { BackendServerManager } from './backend-server-manager.js';
 // Component name for logging
 function getComponentName() {

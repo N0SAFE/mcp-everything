@@ -15,7 +15,7 @@ import {
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import Ajv from 'ajv';
-import { Logger } from "utils/logging";
+import { Logger } from "../utils/logging.js";
 
 export type ToolListResponse = {
   tools: (Omit<ToolDefinition, "inputSchema"> & {

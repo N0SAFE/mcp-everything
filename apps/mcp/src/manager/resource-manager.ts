@@ -1,6 +1,6 @@
 // ResourceManager handles resource logic for McpServer
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { Logger } from "utils/logging";
+import { Logger } from "../utils/logging.js";
 // Component name for logging
 function getComponentName() {
   return "resource-manager";
