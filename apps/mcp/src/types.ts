@@ -1,5 +1,6 @@
 import * as z from "zod";
 import { ZodRawShape } from "zod";
+import type * as JSONSchema from "zod/v4/core/json-schema.cjs";
 
 // Shared types for McpServer and managers
 export type ToolMode = "readOnly" | "readWrite";
@@ -10,10 +11,11 @@ export interface DynamicToolDiscoveryOptions {
   enabled: boolean;
   defaultEnabledToolsets?: string[];
 }
+
 export interface ToolDefinition {
   name: string;
   description: string;
-  inputSchema: z.ZodObject<ZodRawShape>;
+  inputSchema: z.ZodObject<ZodRawShape> | JSONSchema.BaseSchema;
   annotations?: {
     title?: string;
     readOnlyHint?: boolean;
@@ -24,7 +26,7 @@ export interface ToolDefinition {
 }
 
 export type ToolHandler<T extends ToolDefinition> = (
-  params: z.infer<T["inputSchema"]>,
+  params: T['inputSchema'] extends z.ZodObject<any> ? z.infer<T['inputSchema']> : any,
   ...[req, opts]: [
     {
       method: "tools/call";
@@ -40,7 +42,7 @@ export type ToolHandler<T extends ToolDefinition> = (
       _meta: unknown;
       sendNotification: (type: string, payload: unknown) => void;
       sendRequest: () => Promise<unknown>;
-      authInfo: AuthInfo;
+      authInfo?: AuthInfo;
       requestId: string;
     },
   ]

@@ -12,17 +12,18 @@ async function main() {
     
     if (process.env.MCP_PROXY_USE_ENV === "true") {
       configManager = ConfigurationManager.createFromEnvironment();
-      console.log("Using configuration from environment variables");
+      console.error("Using configuration from environment variables");
     } else {
       configManager = new ConfigurationManager(process.env.MCP_PROXY_CONFIG_PATH);
-      console.log(`Using configuration from file: ${process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"}`);
+      console.error(`Using configuration from file: ${process.env.MCP_PROXY_CONFIG_PATH || "./mcp-proxy-config.json"}`);
     }
 
     // Get toolset configuration from command line/environment
     const toolsetConfig = getConfigFromCommanderAndEnv();
 
-    // Create proxy server
-    const server = new ProxyMcpServer({
+    // Create proxy server with async initialization
+    console.error("🚀 Initializing MCP Proxy Server...");
+    const server = await ProxyMcpServer.create({
       name: "mcp-proxy-server",
       version: "1.0.0",
       toolsetConfig: toolsetConfig.toolsetConfig || { mode: "readWrite" },

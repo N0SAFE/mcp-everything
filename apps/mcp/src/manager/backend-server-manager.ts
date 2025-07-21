@@ -2,6 +2,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   BackendServerConfig,
   BackendServerStatus,
@@ -23,17 +24,44 @@ export interface BackendServerConnection {
 export class BackendServerManager {
   private connections: Map<string, BackendServerConnection> = new Map();
   private reconnectIntervals: Map<string, NodeJS.Timeout> = new Map();
+  private _initialized: Promise<void>;
 
   constructor(private serverConfigs: BackendServerConfig[]) {
-    this.initializeServers();
+    this._initialized = this.initializeServers();
+  }
+
+  // Helper function to substitute environment variables in strings
+  private substituteEnvVars(value: string): string {
+    return value.replace(/\$\{([^}]+)\}/g, (match, envVar) => {
+      return process.env[envVar] || match;
+    });
+  }
+
+  // Helper function to substitute environment variables in headers object
+  private substituteEnvVarsInHeaders(headers: Record<string, string>): Record<string, string> {
+    const substituted: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+      substituted[key] = this.substituteEnvVars(value);
+    }
+    return substituted;
+  }
+
+  // Wait for all initial connections to complete
+  async waitForInitialization(): Promise<void> {
+    await this._initialized;
   }
 
   private async initializeServers() {
+    console.error(`Initializing ${this.serverConfigs.length} backend servers...`);
     for (const config of this.serverConfigs) {
       if (config.enabled) {
+        console.error(`Connecting to server: ${config.id} (${config.name})`);
         await this.connectToServer(config);
+      } else {
+        console.error(`Skipping disabled server: ${config.id} (${config.name})`);
       }
     }
+    console.error(`Backend server initialization complete. ${this.connections.size} servers connected.`);
   }
 
   async connectToServer(config: BackendServerConfig): Promise<void> {
@@ -67,9 +95,14 @@ export class BackendServerManager {
           if (!config.http) {
             throw new Error("http configuration required for http transport");
           }
-          // Note: HTTP transport may need to be implemented separately
-          // For now, we'll throw an error as it's not available in the current SDK
-          throw new Error("HTTP transport not yet implemented in this SDK version");
+          const httpOptions: any = {};
+          if (config.http.headers) {
+            httpOptions.headers = this.substituteEnvVarsInHeaders(config.http.headers);
+          }
+          if (config.http.timeout) {
+            httpOptions.timeout = config.http.timeout;
+          }
+          transport = new StreamableHTTPClientTransport(new URL(config.http.url), httpOptions);
           break;
         case "sse":
           if (!config.sse) {
@@ -104,7 +137,7 @@ export class BackendServerManager {
       await this.loadServerCapabilities(connection);
 
       this.connections.set(config.id, connection);
-      console.log(`Connected to backend server: ${config.name} (${config.id})`);
+      console.error(`Connected to backend server: ${config.name} (${config.id})`);
     } catch (error) {
       console.error(`Failed to connect to server ${config.id}:`, error);
       const status: BackendServerStatus = {
@@ -118,6 +151,8 @@ export class BackendServerManager {
 
   private async loadServerCapabilities(connection: BackendServerConnection) {
     try {
+      console.error(`Loading capabilities for server: ${connection.config.id}`);
+      
       // Load tools
       const toolsResult = await connection.client.listTools();
       if (toolsResult.tools) {
@@ -126,6 +161,9 @@ export class BackendServerManager {
           connection.tools.set(tool.name, tool);
         }
         connection.status.toolsCount = toolsResult.tools.length;
+        console.error(`Loaded ${toolsResult.tools.length} tools for server ${connection.config.id}: ${toolsResult.tools.map(t => t.name).join(', ')}`);
+      } else {
+        console.error(`No tools found for server ${connection.config.id}`);
       }
 
       // Load resources
@@ -137,6 +175,7 @@ export class BackendServerManager {
             connection.resources.set(resource.uri, resource);
           }
           connection.status.resourcesCount = resourcesResult.resources.length;
+          console.error(`Loaded ${resourcesResult.resources.length} resources for server ${connection.config.id}`);
         }
       } catch (error) {
         // Resources not supported

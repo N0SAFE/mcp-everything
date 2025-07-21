@@ -90,6 +90,16 @@
         "picocolors": "^1.0.0",
         "prompts": "^2.4.2",
         "@types/prompts": "^2.4.9"
+      },
+      "mcp": {
+        "@modelcontextprotocol/sdk": "^1.16.0",
+        "@modelcontextprotocol/inspector": "^0.1.0",
+        "commander": "^14.0.0",
+        "cors": "^2.8.5",
+        "express": "^5.1.0",
+        "socket.io": "^4.8.1",
+        "zod": "^4.0.0",
+        "zod-to-json-schema": "^3.24.5"
       }
     }
   },
@@ -107,6 +117,11 @@
     "dev:web:down:volumes": "docker compose -f ./docker-compose.web.yml down --volumes",
     "dev:api:logs": "docker compose -f ./docker-compose.api.yml logs -f",
     "dev:web:logs": "docker compose -f ./docker-compose.web.yml logs -f",
+    "dev:mcp": "bun --bun run dev:mcp:down && docker compose -f ./docker-compose.mcp.yml up",
+    "dev:mcp:build": "bun --bun run dev:mcp:down && docker compose -f ./docker-compose.mcp.yml up --build",
+    "dev:mcp:down": "docker compose -f ./docker-compose.mcp.yml down",
+    "dev:mcp:logs": "docker compose -f ./docker-compose.mcp.yml logs -f",
+    "dev:mcp:run": "envcli docker exec -it ${COMPOSE_PROJECT_NAME:-nextjs-directus}-mcp-inspector-dev /bin/sh",
     "dev:api:run": "envcli docker exec -it ${COMPOSE_PROJECT_NAME:-nextjs-directus}-api-dev /bin/sh",
     "dev:web:run": "envcli docker exec -it ${COMPOSE_PROJECT_NAME:-nextjs-directus}-web-dev /bin/sh",
     "dev:local": "turbo dev",
@@ -159,6 +174,7 @@
     "@repo/tailwind-config": "dotenv -e .env -- bun --bun --cwd=./packages/tailwind-config run --",
     "@repo/eslint-config": "dotenv -e .env -- bun --bun --cwd=./packages/eslint-config run --",
     "@repo/directus-sdk": "dotenv -e .env -- bun --bun --cwd=./packages/directus-sdk run --",
+    "mcp": "dotenv -e .env -- bun --bun --cwd=./apps/mcp run --",
     ".": "dotenv -e .env -- bun --bun --cwd=./ run --",
     "rm:node_modules": "concurrently \"bun --bun x rimraf --glob packages/*/node_modules\" \"bun --bun x rimraf --glob apps/*/node_modules\"",
     " ": " "

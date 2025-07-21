@@ -133,7 +133,7 @@ async function createEnhancedProxyServer() {
   configManager.updateConfiguration(enhancedConfig);
 
   // Create the enhanced proxy server
-  const server = new ProxyMcpServer({
+  const server = await ProxyMcpServer.create({
     name: "enhanced-mcp-proxy-server",
     version: "1.0.0",
     toolsetConfig: { mode: "readWrite" },

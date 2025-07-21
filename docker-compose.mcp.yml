@@ -1,0 +1,54 @@
+# MCP-specific Docker Compose for development
+services:
+  # MCP Inspector for development
+  mcp-inspector-dev:
+    container_name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}-mcp-inspector-dev
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.mcp.dev
+      args:
+        - NODE_ENV=development
+    restart: unless-stopped
+    ports:
+      # MCP Inspector Web UI - Access the inspector interface
+      - "${MCP_INSPECTOR_CLIENT_PORT:-3001}:3001"
+      # MCP Server endpoint - Used by inspector to connect to MCP servers
+      - "${MCP_INSPECTOR_SERVER_PORT:-3002}:3002"
+    volumes:
+      # Mount source code for hot reloading
+      - ./apps/mcp:/app/apps/mcp
+      - /app/apps/mcp/node_modules
+      - /app/apps/mcp/dist
+      # Mount Docker socket to enable Docker commands from within container
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Add user configuration to match host user for Docker socket access
+    user: "1001:999"  # appuser:docker
+    # Ensure the container can access Docker socket
+    group_add:
+      - "999"  # docker group
+    environment:
+      - NODE_ENV=development
+      - MCP_PROXY_CONFIG_PATH=./mcp-proxy-config.json
+      # MCP Inspector Configuration
+      - CLIENT_PORT=3001
+      - SERVER_PORT=3002
+      - HOST=0.0.0.0
+      - PORT=3001
+      # Port configuration for inspector
+      - MCP_INSPECTOR_CLIENT_PORT=3001
+      - MCP_INSPECTOR_SERVER_PORT=3002
+      # Enable hot reloading
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+      # Docker configuration for container-to-host communication
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-nextjs-directus}
+    networks:
+      - app_network_dev
+
+networks:
+  app_network_dev:
+    name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}_app_network_dev
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"

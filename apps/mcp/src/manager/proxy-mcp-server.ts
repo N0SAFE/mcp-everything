@@ -19,7 +19,8 @@ export class ProxyMcpServer extends McpServer {
   private proxyToolManager: ProxyToolManager;
   private dynamicServerCreator: DynamicServerCreator;
 
-  constructor({
+  // Static factory method for async initialization
+  static async create({
     name,
     version,
     toolsetConfig,
@@ -33,24 +34,73 @@ export class ProxyMcpServer extends McpServer {
     dynamicToolDiscovery?: DynamicToolDiscoveryOptions;
     instructions?: string;
     configurationManager?: ConfigurationManager;
-  }) {
+  }): Promise<ProxyMcpServer> {
     // Initialize configuration manager
     const configMgr = configurationManager || new ConfigurationManager();
     const proxyConfig = configMgr.getConfiguration();
 
-    // Initialize backend server manager
+    console.error("🚀 Starting MCP Proxy Server initialization...");
+
+    // Initialize backend server manager and wait for all connections
     const backendServerManager = new BackendServerManager(proxyConfig.servers);
+    console.error("⏳ Waiting for all backend servers to connect...");
+    await backendServerManager.waitForInitialization();
+    console.error("✅ All backend servers initialized");
 
     // Initialize dynamic server creator
     const dynamicServerCreator = new DynamicServerCreator();
 
-    // Initialize proxy tool manager
+    // Initialize proxy tool manager (this will now have access to all connected servers)
+    console.error("⏳ Loading tools from backend servers...");
     const proxyToolManager = new ProxyToolManager(
       name,
       backendServerManager,
       toolsetConfig,
       dynamicToolDiscovery
     );
+
+    // Wait for proxy tools to be loaded
+    await proxyToolManager.waitForInitialization();
+    console.error("✅ All tools loaded from backend servers");
+
+    // Create the proxy server instance
+    const instance = new ProxyMcpServer(
+      {
+        name,
+        version,
+        toolsetConfig,
+        dynamicToolDiscovery,
+        instructions,
+      },
+      configMgr,
+      backendServerManager,
+      proxyToolManager,
+      dynamicServerCreator
+    );
+
+    console.error("🎯 MCP Proxy Server ready to accept requests!");
+    return instance;
+  }
+
+  private constructor(
+    {
+      name,
+      version,
+      toolsetConfig,
+      dynamicToolDiscovery,
+      instructions,
+    }: {
+      name: string;
+      version: string;
+      toolsetConfig: ToolsetConfig;
+      dynamicToolDiscovery?: DynamicToolDiscoveryOptions;
+      instructions?: string;
+    },
+    configMgr: ConfigurationManager,
+    backendServerManager: BackendServerManager,
+    proxyToolManager: ProxyToolManager,
+    dynamicServerCreator: DynamicServerCreator
+  ) {
 
     // Create server management tools
     const serverManagementTools = ProxyMcpServer.createServerManagementTools(
@@ -67,8 +117,16 @@ export class ProxyMcpServer extends McpServer {
       proxyToolManager
     );
 
-    // Combine with existing proxy tools - pass empty array since we'll add tools directly to proxyToolManager
-    const allTools: ToolCapability[] = [];
+    // Add server management and dynamic server tools to the proxy tool manager BEFORE getting all tools
+    for (const tool of [...serverManagementTools, ...dynamicServerTools]) {
+      proxyToolManager.addTool(tool);
+    }
+
+    // Get all tools from the proxy tool manager (includes discovery tools + backend server tools + management tools)
+    const allTools: ToolCapability[] = proxyToolManager.getAllTools();
+    
+    console.error(`📊 Total tools available: ${allTools.length}`);
+    console.error(`🔧 Enabled tools: ${proxyToolManager.getEnabledTools().size}`);
 
     // Enhanced instructions for proxy server
     const proxyInstructions = `
@@ -128,10 +186,8 @@ ${instructions || ""}`;
     // @ts-ignore - accessing private field
     this.toolManager = proxyToolManager;
 
-    // Add server management and dynamic server tools to the proxy tool manager
-    for (const tool of [...serverManagementTools, ...dynamicServerTools]) {
-      proxyToolManager.addTool(tool);
-    }
+    // Log all enabled tools on startup
+    this.logEnabledToolsOnStartup();
 
     // Set up cleanup on shutdown
     process.on("SIGTERM", () => this.shutdownProxy());
@@ -155,16 +211,16 @@ ${instructions || ""}`;
         stdio: z.object({
           command: z.string().describe("Command to execute"),
           args: z.array(z.string()).optional().describe("Command arguments"),
-          env: z.record(z.string()).optional().describe("Environment variables"),
+          env: z.record(z.string(), z.string()).optional().describe("Environment variables"),
         }).optional(),
         http: z.object({
           url: z.string().describe("HTTP endpoint URL"),
-          headers: z.record(z.string()).optional().describe("HTTP headers"),
+          headers: z.record(z.string(), z.string()).optional().describe("HTTP headers"),
           timeout: z.number().optional().describe("Request timeout in milliseconds"),
         }).optional(),
         sse: z.object({
           url: z.string().describe("SSE endpoint URL"),
-          headers: z.record(z.string()).optional().describe("HTTP headers"),
+          headers: z.record(z.string(), z.string()).optional().describe("HTTP headers"),
           timeout: z.number().optional().describe("Connection timeout in milliseconds"),
         }).optional(),
         security: z.object({
@@ -376,7 +432,7 @@ ${instructions || ""}`;
           command: z.string().optional().describe("Command to execute for custom servers"),
           args: z.array(z.string()).optional().describe("Command arguments"),
           serverCode: z.string().optional().describe("Custom server code (JavaScript/Node.js)"),
-          env: z.record(z.string()).optional().describe("Environment variables"),
+          env: z.record(z.string(), z.string()).optional().describe("Environment variables"),
           requireAuth: z.boolean().optional().describe("Whether the server requires authentication"),
         }).optional().describe("Server-specific configuration options"),
       }),
@@ -591,11 +647,11 @@ ${instructions || ""}`;
   }
 
   private async shutdownProxy() {
-    console.log("Shutting down MCP Proxy Server...");
+    console.error("Shutting down MCP Proxy Server...");
     try {
       await this.backendServerManager.shutdown();
       await this.server.close();
-      console.log("MCP Proxy Server shut down successfully");
+      console.error("MCP Proxy Server shut down successfully");
     } catch (error) {
       console.error("Error during shutdown:", error);
     }
@@ -613,6 +669,106 @@ ${instructions || ""}`;
 
   get tools() {
     return this.proxyToolManager;
+  }
+
+  private async logEnabledToolsOnStartup() {
+    // Wait a moment for all servers to initialize
+    setTimeout(async () => {
+      try {
+        console.error("=".repeat(80));
+        console.error("🚀 MCP PROXY SERVER - ENABLED TOOLS SUMMARY");
+        console.error("=".repeat(80));
+
+        // Get all enabled tools
+        const allTools = this.proxyToolManager.getAllTools();
+        const enabledTools = allTools.filter(tool => 
+          this.proxyToolManager.getEnabledTools().has(tool.definition.name)
+        );
+
+        console.error(`\n📊 SUMMARY:`);
+        console.error(`   Total Tools Available: ${allTools.length}`);
+        console.error(`   Enabled Tools: ${enabledTools.length}`);
+        console.error(`   Backend Servers: ${this.backendServerManager.getConnectedServers().length}`);
+
+        // Group tools by category
+        const proxyManagementTools = enabledTools.filter(tool => 
+          tool.definition.name.startsWith('proxy_')
+        );
+        const backendTools = enabledTools.filter(tool => 
+          !tool.definition.name.startsWith('proxy_')
+        );
+
+        // Log proxy management tools
+        if (proxyManagementTools.length > 0) {
+          console.error(`\n🛠️  PROXY MANAGEMENT TOOLS (${proxyManagementTools.length}):`);
+          proxyManagementTools.forEach(tool => {
+            console.error(`   ✓ ${tool.definition.name}`);
+            console.error(`     ${tool.definition.description}`);
+          });
+        }
+
+        // Group backend tools by server
+        if (backendTools.length > 0) {
+          console.error(`\n🔧 BACKEND SERVER TOOLS (${backendTools.length}):`);
+          
+          const toolsByServer: { [serverId: string]: any[] } = {};
+          backendTools.forEach(tool => {
+            if ('serverId' in tool.definition) {
+              const { serverId } = tool.definition as any;
+              if (!toolsByServer[serverId]) {
+                toolsByServer[serverId] = [];
+              }
+              toolsByServer[serverId].push(tool);
+            } else {
+              // Handle tools without serverId (like discovery tools)
+              if (!toolsByServer['core']) {
+                toolsByServer['core'] = [];
+              }
+              toolsByServer['core'].push(tool);
+            }
+          });
+
+          Object.entries(toolsByServer).forEach(([serverId, tools]) => {
+            const serverConnection = this.backendServerManager.getServerConnection(serverId);
+            const serverName = serverConnection?.config.name || serverId;
+            const isConnected = serverConnection?.status.connected || false;
+            const connectionStatus = isConnected ? "🟢 CONNECTED" : "🔴 DISCONNECTED";
+            
+            console.error(`\n   📡 ${serverName} (${serverId}) - ${connectionStatus}:`);
+            tools.forEach(tool => {
+              const originalName = 'originalName' in tool.definition ? 
+                (tool.definition as any).originalName : tool.definition.name;
+              console.error(`      ✓ ${originalName} → ${tool.definition.name}`);
+            });
+          });
+        }
+
+        // Log server statuses
+        const serverStatuses = this.backendServerManager.getServerStatuses();
+        if (serverStatuses.length > 0) {
+          console.error(`\n🌐 SERVER STATUS DETAILS:`);
+          serverStatuses.forEach(status => {
+            const statusIcon = status.connected ? "🟢" : "🔴";
+            const errorInfo = status.lastError ? ` (Error: ${status.lastError})` : "";
+            console.error(`   ${statusIcon} ${status.id}: ${status.toolsCount || 0} tools${errorInfo}`);
+          });
+        }
+
+        // Log security information
+        const config = this.configurationManager.getConfiguration();
+        if (config.security?.globalBlockedTools?.length) {
+          console.error(`\n🔒 SECURITY:`);
+          console.error(`   Globally Blocked Tools: ${config.security.globalBlockedTools.join(', ')}`);
+        }
+
+        console.error("\n" + "=".repeat(80));
+        console.error("🎯 Ready to receive tool calls!");
+        console.error("=".repeat(80) + "\n");
+
+      } catch (error) {
+        console.error("Error logging enabled tools:", error);
+      }
+    }, 2000); // Wait 2 seconds for servers to connect
   }
 
   get serverCreator() {

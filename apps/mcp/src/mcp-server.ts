@@ -224,7 +224,7 @@ export class McpServer {
       }
       
       await this._server.close();
-      console.log("MCP Server shut down gracefully");
+      console.error("MCP Server shut down gracefully");
     } catch (error) {
       console.error("Error during shutdown:", error);
     }

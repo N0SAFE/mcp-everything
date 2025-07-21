@@ -160,7 +160,7 @@ export class ResourceManager {
       if (uris.has(uri)) {
         // Here you would send the notification to the specific session
         // This would be handled by the server transport layer
-        console.log(`Resource ${uri} changed for session ${sessionId}`, content);
+        console.error(`Resource ${uri} changed for session ${sessionId}`, content);
       }
     }
   }

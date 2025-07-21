@@ -9,6 +9,7 @@ import {
 } from "../types";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import Ajv from 'ajv';
 
 export type ToolListResponse = {
   tools: (Omit<ToolDefinition, "inputSchema"> & {
@@ -30,7 +31,7 @@ export class ToolManager {
       _meta: unknown;
       sendNotification: (type: string, payload: unknown) => void;
       sendRequest: () => Promise<unknown>;
-      authInfo: AuthInfo;
+      authInfo?: AuthInfo;
       requestId: string;
     }
   ];
@@ -164,7 +165,7 @@ export class ToolManager {
           },
         },
         handler: async (params, req, opts) => {
-          console.log(
+          console.error(
             `Dynamic tool trigger called with params: ${JSON.stringify(
               params,
               null,
@@ -189,7 +190,7 @@ export class ToolManager {
                 `Unknown tool: ${name}`
               );
             }
-            console.log(
+            console.error(
               `Dynamic tool trigger: ${trigger} ${name} (${internal})`
             );
             if (trigger === "enable") {
@@ -236,24 +237,34 @@ export class ToolManager {
     }
   }
 
-  async isEnabledTool(name: string, authInfo: AuthInfo): Promise<boolean> {
-    console.log(
-      `Checking if tool ${name} is enabled for ${authInfo.clientId}. reult: ${
+  async isEnabledTool(name: string, authInfo?: AuthInfo): Promise<boolean> {
+    const clientId = authInfo?.clientId || 'unknown-client';
+    
+    // Provide default authInfo if not provided
+    const defaultAuthInfo: AuthInfo = authInfo || {
+      token: '',
+      clientId: 'unknown-client',
+      scopes: [],
+      extra: {}
+    };
+    
+    console.error(
+      `Checking if tool ${name} is enabled for ${clientId}. result: ${
         this.enabledTools.has(name) ? "enabled" : "not enabled"
       } and canBeEnabled: ${
-        this.tools.get(name)?.meta?.canBeEnabled?.(authInfo) !== false
+        this.tools.get(name)?.meta?.canBeEnabled?.(defaultAuthInfo) !== false
           ? "true"
           : "false"
       } so : ${
         this.enabledTools.has(name) &&
-        (await this.tools.get(name)?.meta?.canBeEnabled?.(authInfo)) !== false
+        (await this.tools.get(name)?.meta?.canBeEnabled?.(defaultAuthInfo)) !== false
           ? "enabled"
           : "not enabled"
       }`
     );
     return (
       this.enabledTools.has(name) &&
-      (await this.tools.get(name)?.meta?.canBeEnabled?.(authInfo)) !== false
+      (await this.tools.get(name)?.meta?.canBeEnabled?.(defaultAuthInfo)) !== false
     );
   }
 
@@ -266,7 +277,7 @@ export class ToolManager {
         _meta: unknown;
         sendNotification: (type: string, payload: unknown) => void;
         sendRequest: () => Promise<unknown>;
-        authInfo: AuthInfo;
+        authInfo?: AuthInfo;
         requestId: string;
       }
     ]
@@ -283,39 +294,68 @@ export class ToolManager {
       )
         .filter(({ enabled }) => enabled)
         .map(({ d }) => d)
-        .map(([_, v]) =>
-          v.definition.inputSchema
-            ? {
-                ...(v.definition.annotations
-                  ? {
-                      ...v.definition,
-                      annotations: {
-                        ...v.definition.annotations,
-                        title: this.toExternalToolDescription(
-                          v.definition.description
-                        ),
-                      },
-                    }
-                  : v.definition),
-                inputSchema: zodToJsonSchema(v.definition.inputSchema, {
-                  $refStrategy: "none",
-                }),
-              }
-            : {
-                ...(v.definition.annotations
-                  ? {
-                      ...v.definition,
-                      annotations: {
-                        ...v.definition.annotations,
-                        title: this.toExternalToolDescription(
-                          v.definition.description
-                        ),
-                      },
-                    }
-                  : v.definition),
-                inputSchema: zodToJsonSchema(z.object({})),
-              }
-        )
+        .map(([_, v]) => {
+          // Validate inputSchema before processing
+          if (!v.definition.inputSchema) {
+            console.error(`Tool ${v.definition.name} has no inputSchema, using empty object schema`);
+            return {
+              ...v.definition,
+              inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            };
+          }
+
+          try {
+            return v.definition.inputSchema
+              ? {
+                  ...(v.definition.annotations
+                    ? {
+                        ...v.definition,
+                        annotations: {
+                          ...v.definition.annotations,
+                          title: this.toExternalToolDescription(
+                            v.definition.description
+                          ),
+                        },
+                      }
+                    : v.definition),
+                  inputSchema: v.definition.inputSchema instanceof z.ZodObject
+                    ? z.toJSONSchema(v.definition.inputSchema)
+                    : v.definition.inputSchema,
+                }
+              : {
+                  ...(v.definition.annotations
+                    ? {
+                        ...v.definition,
+                        annotations: {
+                          ...v.definition.annotations,
+                          title: this.toExternalToolDescription(
+                            v.definition.description
+                          ),
+                        },
+                      }
+                    : v.definition),
+                  inputSchema: {
+                    type: "object",
+                    properties: {},
+                    additionalProperties: false,
+                  },
+                };
+          } catch (error) {
+            console.error(`Error processing tool ${v.definition.name}:`, error);
+            return {
+              ...v.definition,
+              inputSchema: {
+                type: "object",
+                properties: {},
+                additionalProperties: false,
+              },
+            };
+          }
+        })
         .map((tool) => {
           return {
             ...tool,
@@ -341,7 +381,7 @@ export class ToolManager {
         _meta: unknown;
         sendNotification: (type: string, payload: unknown) => void;
         sendRequest: () => Promise<unknown>;
-        authInfo: AuthInfo;
+        authInfo?: AuthInfo;
         requestId: string;
       }
     ]
@@ -366,13 +406,39 @@ export class ToolManager {
         `Invalid parameters: ${req.params.arguments}`
       );
     }
-    const toolDefinition = toolCapability.definition;
-    const inputSchema = toolDefinition.inputSchema;
-    const validationResult = inputSchema.safeParse(req.params.arguments);
-    if (!validationResult.success) {
+    
+    const { inputSchema } = toolCapability.definition;
+    
+    let validatedData: any;
+    
+    // Check if inputSchema is a Zod schema or JSON schema
+    if (inputSchema && typeof inputSchema.safeParse === 'function') {
+      // It's a Zod schema
+      const validationResult = inputSchema.safeParse(req.params.arguments);
+      if (!validationResult.success) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Invalid parameters: ${validationResult.error}`
+        );
+      }
+      validatedData = validationResult.data;
+    } else if (inputSchema && typeof inputSchema === 'object' && 'type' in inputSchema) {
+      // It's a JSON schema, use AJV for validation
+      const ajv = new Ajv();
+      const validate = ajv.compile(inputSchema);
+      const valid = validate(req.params.arguments);
+      
+      if (!valid) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `Invalid parameters: ${ajv.errorsText(validate.errors)}`
+        );
+      }
+      validatedData = req.params.arguments;
+    } else {
       throw new McpError(
-        ErrorCode.InvalidParams,
-        `Invalid parameters: ${validationResult.error}`
+        ErrorCode.InternalError,
+        `Tool ${toolName} has invalid input schema - expected Zod schema or JSON schema`
       );
     }
     try {
@@ -385,7 +451,7 @@ export class ToolManager {
           arguments: req.params.arguments || {}
         }
       };
-      return await toolCapability.handler(validationResult.data, reqWithDefaults, opts);
+      return await toolCapability.handler(validatedData, reqWithDefaults, opts);
     } catch (err) {
       console.error("Tool handler error:", err);
       if (err instanceof McpError) {

@@ -1,0 +1,139 @@
+# MCP Development Dockerfile (Simplified)
+FROM oven/bun:latest
+
+# Set work directory
+WORKDIR /app
+
+# Install basic system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    curl \
+    git \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (includes npm and npx)
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
+    apt-get install -y nodejs
+
+# Install Docker CLI to communicate with host Docker daemon
+RUN mkdir -p /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Docker Compose
+RUN curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose
+
+
+# Install uv (which includes uvx) system-wide
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/ && \
+    mv /root/.local/bin/uvx /usr/local/bin/
+
+# Create docker group and add to system (GID should match host docker group)
+# Note: The GID (999) is commonly used for Docker group, but may vary by system
+RUN groupadd -g 999 docker 2>/dev/null || true
+
+# Check what users exist and create/configure appuser
+RUN echo "=== Checking existing users ===" && \
+    cat /etc/passwd | grep -E "(1000|bun)" || echo "No user with UID 1000 or bun user found" && \
+    echo "=== Creating appuser ===" && \
+    # Try to create user with UID 1001 first
+    if ! id -u 1001 >/dev/null 2>&1; then \
+        groupadd -g 1001 appuser && \
+        useradd -m -u 1001 -g 1001 -G docker -s /bin/bash appuser; \
+    else \
+        echo "UID 1001 exists, trying 1002..."; \
+        groupadd -g 1002 appuser && \
+        useradd -m -u 1002 -g 1002 -G docker -s /bin/bash appuser; \
+    fi && \
+    echo "User created: $(id appuser)"
+
+# Copy package.json and bun.lockb for better caching
+COPY package.json bun.lockb* bunfig.toml ./
+COPY apps/mcp/package.json ./apps/mcp/
+
+# Install dependencies
+RUN bun install --frozen-lockfile
+
+# Copy source code
+COPY . .
+
+# Build the MCP application
+RUN cd apps/mcp && bun run build
+
+# Set environment variables for MCP Inspector
+ENV NODE_ENV=development
+ENV MCP_PROXY_CONFIG_PATH=./mcp-proxy-config.json
+
+# MCP Inspector Configuration:
+# CLIENT_PORT: The port where the MCP Inspector web UI will be accessible
+# This is the port you'll open in your browser to use the inspector interface
+ENV CLIENT_PORT=3001
+
+# SERVER_PORT: The port where the MCP server runs that the inspector connects to
+# This is typically used for HTTP-based MCP servers, not stdio-based ones
+# For stdio servers, the inspector will start and connect to the server process directly
+ENV SERVER_PORT=3002
+
+# Expose both ports:
+# 3001: MCP Inspector Web UI (CLIENT_PORT) - Access via http://localhost:3001
+# 3002: MCP Server endpoint (SERVER_PORT) - Used internally by inspector
+EXPOSE $CLIENT_PORT $SERVER_PORT
+
+# Working directory for MCP
+WORKDIR /app/apps/mcp
+
+# Create a startup script that verifies Docker access
+RUN echo '#!/bin/bash\n\
+echo "=== MCP Container Startup ==="\n\
+echo "Node.js version: $(node --version)"\n\
+echo "npm version: $(npm --version)"\n\
+echo "uv version: $(uv --version)"\n\
+echo "Bun version: $(bun --version)"\n\
+echo "Docker CLI version: $(docker --version 2>/dev/null || echo \"Docker CLI not accessible\")"\n\
+echo "Testing Docker access..."\n\
+# Try to fix Docker socket permissions if needed\n\
+if [ -S /var/run/docker.sock ]; then\n\
+    echo "Docker socket found, checking permissions..."\n\
+    if ! docker info >/dev/null 2>&1; then\n\
+        echo "Docker socket permissions issue, attempting to fix..."\n\
+        # Try to change socket permissions (may fail on some systems)\n\
+        sudo chmod 666 /var/run/docker.sock 2>/dev/null || echo "Could not fix permissions (normal on some systems)"\n\
+    fi\n\
+fi\n\
+if docker info >/dev/null 2>&1; then\n\
+    echo "✅ Docker access working - can communicate with host Docker daemon"\n\
+    echo "Available containers: $(docker ps --format \"table {{.Names}}\\t{{.Status}}\" | wc -l) containers running"\n\
+else\n\
+    echo "❌ Docker access failed - check socket mounting and permissions"\n\
+    echo "Docker socket exists: $(ls -la /var/run/docker.sock 2>/dev/null || echo \"Not found\")"\n\
+    echo "User groups: $(groups)"\n\
+    echo "Note: Docker access may require running with privileged mode or fixing host permissions"\n\
+fi\n\
+echo "Available npm global packages:"\n\
+npm list -g --depth=0 2>/dev/null | head -10\n\
+echo "=========================================="\n\
+echo "Starting MCP Inspector on port $CLIENT_PORT..."\n\
+exec "$@"\n\
+' > /app/docker-startup.sh && chmod +x /app/docker-startup.sh
+
+# Ensure the appuser has access to the application directory
+RUN chown -R appuser:appuser /app
+
+# Make test script executable
+RUN chmod +x /app/apps/mcp/test-docker-access.sh
+
+# Switch to non-root user for security, but with Docker access
+USER appuser
+
+# Default command runs the MCP inspector with proper host binding
+# Use startup script to verify Docker access and then start the inspector
+CMD ["/app/docker-startup.sh", "sh", "-c", "PORT=$CLIENT_PORT bun --bun run inspect"]

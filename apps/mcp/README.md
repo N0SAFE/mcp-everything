@@ -50,6 +50,8 @@ This MCP proxy server acts as a centralized gateway that allows LLMs and AI appl
 - **📈 Monitoring**: Health checks and metrics endpoints
 - **🔧 Configuration Hot-Reload**: Dynamic configuration updates
 - **🎯 Load Balancing**: Multiple backend server load distribution
+- **🐳 Docker-in-Docker Support**: Full Docker access from container with npx support
+- **📦 NPX Integration**: Install and run Node.js MCP servers dynamically
 
 ## 🚀 Quick Start
 
@@ -86,6 +88,22 @@ curl http://localhost:3000/health
 
 # Get server information
 curl http://localhost:3000/info
+```
+
+### 4. Docker Development (Advanced)
+
+```bash
+# Start MCP with Docker-in-Docker support
+docker-compose -f docker-compose.mcp.yml up
+
+# Test Docker access from within container
+docker exec -it mcp-inspector-dev ./test-docker-access.sh
+
+# Use npx to run MCP servers dynamically
+docker exec -it mcp-inspector-dev npx -y @modelcontextprotocol/server-filesystem /tmp
+
+# Access MCP Inspector with full Docker capabilities
+open http://localhost:3001
 ```
 
 ## 📦 Installation
@@ -172,6 +190,70 @@ See [`mcp-proxy-config.enhanced.json`](./mcp-proxy-config.enhanced.json) for a c
 - Authentication settings
 - Monitoring configuration
 - Performance tuning
+
+### Pre-configured MCP Servers
+
+This proxy comes with several pre-configured MCP servers ready to use:
+
+#### 📚 **Context7 Documentation Server**
+- **Purpose**: Fetches up-to-date documentation for libraries and frameworks
+- **Tools**: `get-library-docs`, `resolve-library-id`
+- **Status**: ✅ Enabled by default
+
+#### 🔧 **Maven Dependencies Server**
+- **Purpose**: Provides Maven dependency information and version checking
+- **Tools**: `check_maven_version_exists`, `get_maven_latest_version`
+- **Status**: ✅ Enabled by default
+
+#### 📝 **MarkItDown Converter**
+- **Purpose**: Converts various file formats to markdown
+- **Tools**: `convert_to_markdown`
+- **Status**: ✅ Enabled by default
+
+#### 🌐 **DeepWiki Knowledge Server**
+- **Purpose**: Access GitHub repository documentation and wiki content
+- **Tools**: `ask_question`, `read_wiki_contents`, `read_wiki_structure`
+- **Transport**: SSE (Server-Sent Events)
+- **Status**: ✅ Enabled by default
+
+#### 🧠 **Sequential Thinking Server**
+- **Purpose**: Provides structured problem-solving and analytical thinking capabilities
+- **Tools**: `sequentialthinking`
+- **Status**: ✅ Enabled by default
+
+#### 🧩 **Memory Knowledge Graph**
+- **Purpose**: Persistent memory and knowledge graph storage for conversations
+- **Tools**: `create_entities`, `create_relations`, `add_observations`, `read_graph`, `search_nodes`
+- **Status**: ✅ Enabled by default
+
+#### 📦 **NPM Package Information**
+- **Purpose**: Fetch detailed information about NPM packages and dependencies
+- **Tools**: `searchNpmPackage`
+- **Status**: ✅ Enabled by default
+
+#### 📁 **File System Access**
+- **Purpose**: Secure file system operations with sandboxed access
+- **Tools**: `read_file`, `write_file`, `list_directory`, `create_directory`
+- **Status**: ✅ Enabled by default
+
+#### 🔀 **Git Repository Operations**
+- **Purpose**: Git repository operations and version control access
+- **Tools**: `git_log`, `git_diff`, `git_status`, `git_branch`, `git_show`
+- **Status**: ✅ Enabled by default
+
+#### 🐙 **GitHub MCP Server (Remote)**
+- **Purpose**: GitHub repository management, issues, PRs, code analysis, and workflow automation
+- **Tools**: `get_repo`, `list_repos`, `create_issue`, `list_pull_requests`, `search_code`
+- **Transport**: HTTP (requires authentication)
+- **Status**: ✅ Enabled (requires `GITHUB_TOKEN` setup)
+- **Setup**: See [GitHub MCP Setup Guide](../../docs/GITHUB-MCP-SETUP.md)
+
+#### 🔍 **Brave Web Search**
+- **Purpose**: Web search capabilities via Brave Search API
+- **Tools**: `brave_web_search`
+- **Status**: ❌ Disabled by default (requires API key)
+
+**Setup Instructions**: Most servers work out-of-the-box, but GitHub requires authentication setup. See the [GitHub MCP Setup Guide](../../docs/GITHUB-MCP-SETUP.md) for detailed configuration instructions.
 
 ## 🎯 Usage
 
@@ -451,6 +533,9 @@ ISC License - see [LICENSE](LICENSE) file for details.
 ## 📚 Additional Resources
 
 - **[Enhanced Proxy Guide](./ENHANCED-PROXY-GUIDE.md)**: Comprehensive usage guide
+- **[Docker-in-Docker Support](../../docs/DOCKER-IN-DOCKER-MCP.md)**: Container Docker access and npx integration
+- **[GitHub MCP Setup](../../docs/GITHUB-MCP-SETUP.md)**: GitHub authentication and integration
+- **[MCP Inspector Setup](../../docs/MCP-INSPECTOR-SETUP.md)**: Development and debugging tools
 - **[MCP Specification](https://spec.modelcontextprotocol.io/)**: Official protocol specification  
 - **[TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)**: Official TypeScript SDK
 - **[Example Servers](https://github.com/modelcontextprotocol/servers)**: Official MCP server implementations

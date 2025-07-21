@@ -19,12 +19,12 @@ export class ConfigurationManager {
         const parsed = JSON.parse(configData);
         return this.validateAndNormalizeConfig(parsed);
       } else {
-        console.log(`Configuration file not found at ${this.configPath}, using default configuration`);
+        console.error(`Configuration file not found at ${this.configPath}, using default configuration`);
         return this.getDefaultConfiguration();
       }
     } catch (error) {
       console.error(`Error loading configuration from ${this.configPath}:`, error);
-      console.log("Using default configuration");
+      console.error("Using default configuration");
       return this.getDefaultConfiguration();
     }
   }
@@ -163,7 +163,7 @@ export class ConfigurationManager {
       }
 
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
-      console.log(`Configuration saved to ${this.configPath}`);
+      console.error(`Configuration saved to ${this.configPath}`);
     } catch (error) {
       console.error(`Error saving configuration to ${this.configPath}:`, error);
       throw error;
@@ -355,6 +355,6 @@ export class ConfigurationManager {
     }
 
     fs.writeFileSync(filePath, JSON.stringify(exampleConfig, null, 2));
-    console.log(`Example configuration generated at ${filePath}`);
+    console.error(`Example configuration generated at ${filePath}`);
   }
 }

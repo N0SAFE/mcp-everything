@@ -213,45 +213,6 @@
       }
     },
     {
-      "id": "github",
-      "name": "GitHub MCP Server (Remote)",
-      "description": "GitHub repository management, issues, PRs, code analysis, and workflow automation via remote server",
-      "transportType": "http",
-      "enabled": true,
-      "http": {
-        "url": "https://api.githubcopilot.com/mcp/",
-        "headers": {
-          "Authorization": "Bearer ${GITHUB_TOKEN}"
-        },
-        "timeout": 30000
-      },
-      "security": {
-        "allowedTools": [
-          "get_repo",
-          "list_repos", 
-          "get_file_contents",
-          "search_repositories",
-          "search_code",
-          "list_issues",
-          "get_issue",
-          "create_issue",
-          "update_issue",
-          "list_pull_requests",
-          "get_pull_request",
-          "create_pull_request",
-          "list_commits",
-          "get_commit",
-          "list_branches",
-          "create_branch",
-          "get_workflow_runs",
-          "get_workflow_run",
-          "list_notifications",
-          "mark_notifications_read"
-        ],
-        "requireAuth": false
-      }
-    },
-    {
       "id": "brave-search",
       "name": "Brave Web Search",
       "description": "Web search capabilities via Brave Search API",

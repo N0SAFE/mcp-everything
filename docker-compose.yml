@@ -141,6 +141,34 @@ services:
     networks:
       - app_network_dev
 
+  # MCP Inspector for development
+  mcp-inspector-dev:
+    container_name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}-mcp-inspector-dev
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile.mcp.dev
+      args:
+        - USER_ID=${USER_ID:-1000}
+        - GROUP_ID=${GROUP_ID:-1000}
+        - NODE_ENV=development
+    restart: unless-stopped
+    ports:
+      - "${MCP_INSPECTOR_PORT:-3001}:3001"
+    volumes:
+      # Mount source code for hot reloading
+      - ./apps/mcp:/app/apps/mcp
+      - /app/apps/mcp/node_modules
+      - /app/apps/mcp/dist
+    environment:
+      - NODE_ENV=development
+      - MCP_PROXY_CONFIG_PATH=./mcp-proxy-config.json
+      - MCP_INSPECTOR_PORT=3001
+      # Enable hot reloading
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    networks:
+      - app_network_dev
+
 networks:
   app_network_dev:
     name: ${COMPOSE_PROJECT_NAME:-nextjs-directus}_app_network_dev

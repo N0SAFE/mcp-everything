@@ -27,7 +27,7 @@ describe('ProxyMcpServer - Dynamic Server Creation', () => {
     configManager = new ConfigurationManager();
     configManager.updateConfiguration(testConfig);
 
-    proxyServer = new ProxyMcpServer({
+    proxyServer = await ProxyMcpServer.create({
       name: "test-proxy-server",
       version: "1.0.0",
       toolsetConfig: { mode: "readWrite" },

@@ -29,15 +29,18 @@ interface McpHttpServer {
 }
 
 export class McpHttpServerManager {
-  private httpServer: McpHttpServer;
+  private httpServer?: McpHttpServer;
   private port: number;
 
   constructor(port: number = 3001) {
     this.port = port;
-    this.httpServer = this.createHttpServer();
   }
 
-  private createHttpServer(): McpHttpServer {
+  async initialize(): Promise<void> {
+    this.httpServer = await this.createHttpServer();
+  }
+
+  private async createHttpServer(): Promise<McpHttpServer> {
     const app = express();
     const server = createServer(app);
     const io = new SocketIOServer(server, {
@@ -51,8 +54,9 @@ export class McpHttpServerManager {
     const toolsetConfig = getConfigFromCommanderAndEnv();
     const configManager = new ConfigurationManager();
     
-    // Create proxy server
-    const proxyServer = new ProxyMcpServer({
+    // Create proxy server with async initialization
+    console.error("🚀 Initializing HTTP MCP Proxy Server...");
+    const proxyServer = await ProxyMcpServer.create({
       name: "mcp-proxy-http",
       version: "1.0.0",
       toolsetConfig: toolsetConfig.toolsetConfig || { mode: "readWrite" },
@@ -286,8 +290,12 @@ export class McpHttpServerManager {
   }
 
   async start(): Promise<void> {
+    if (!this.httpServer) {
+      await this.initialize();
+    }
+    
     return new Promise((resolve) => {
-      this.httpServer.server.listen(this.port, () => {
+      this.httpServer!.server.listen(this.port, () => {
         console.log(`🚀 MCP HTTP Server running on port ${this.port}`);
         console.log(`📡 Health check: http://localhost:${this.port}/health`);
         console.log(`🔌 WebSocket endpoint: ws://localhost:${this.port}`);
@@ -298,16 +306,20 @@ export class McpHttpServerManager {
   }
 
   async stop(): Promise<void> {
+    if (!this.httpServer) {
+      return;
+    }
+    
     return new Promise((resolve) => {
-      this.httpServer.server.close(() => {
+      this.httpServer!.server.close(() => {
         console.log('MCP HTTP Server stopped');
         resolve();
       });
     });
   }
 
-  getExpressApp(): express.Application {
-    return this.httpServer.app;
+  getExpressApp(): express.Application | undefined {
+    return this.httpServer?.app;
   }
 }
 
@@ -316,6 +328,8 @@ async function main() {
   const port = parseInt(process.env.MCP_HTTP_PORT || '3001');
   const server = new McpHttpServerManager(port);
   
+  // Initialize and start the server
+  console.error("🚀 Starting MCP HTTP Server initialization...");
   await server.start();
 
   // Graceful shutdown

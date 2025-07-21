@@ -15,6 +15,7 @@ import { z } from "zod";
 export class ProxyToolManager extends ToolManager {
   private backendServerManager: BackendServerManager;
   private serverDiscoveryTools: ToolCapability[] = [];
+  private _initializationComplete: Promise<void>;
 
   constructor(
     mcpServerName: string,
@@ -32,11 +33,27 @@ export class ProxyToolManager extends ToolManager {
     this.backendServerManager = backendServerManager;
     this.serverDiscoveryTools = discoveryTools;
 
-    // Load proxy tools from all connected servers
-    this.loadProxyToolsFromServers();
+    // Start proxy tools initialization
+    this._initializationComplete = this.initializeProxyTools();
 
     // Set up auto-refresh when servers change
     this.setupServerChangeHandlers();
+  }
+
+  // Wait for proxy tool initialization to complete
+  async waitForInitialization(): Promise<void> {
+    await this._initializationComplete;
+  }
+
+  private async initializeProxyTools() {
+    // Wait for backend servers to initialize
+    await this.backendServerManager.waitForInitialization();
+    
+    // Now load proxy tools from connected servers
+    await this.loadProxyToolsFromServers();
+    
+    // Notify about tool list changes
+    this.notifyEnabledToolsChanged();
   }
 
   private static createServerDiscoveryTools(
@@ -225,19 +242,27 @@ export class ProxyToolManager extends ToolManager {
       }),
     ];
   }
+  
+  hasTools() {return true}
 
   private async loadProxyToolsFromServers() {
+    console.error("Loading proxy tools from servers...");
     const connections = this.backendServerManager.getConnectedServers();
+    console.error(`Found ${connections.length} connected servers`);
     const proxyTools: ToolCapability[] = [];
 
     for (const connection of connections) {
+      console.error(`Loading tools from server: ${connection.config.id} (${connection.tools.size} tools)`);
       for (const [toolName, tool] of connection.tools) {
         // Create proxy tool
         const proxyToolName = `${connection.config.id}__${toolName}`;
         const proxyTool = this.createProxyTool(connection.config.id, tool, proxyToolName);
         proxyTools.push(proxyTool);
+        console.error(`Created proxy tool: ${proxyToolName}`);
       }
     }
+
+    console.error(`Total proxy tools created: ${proxyTools.length}`);
 
     // Add proxy tools to the manager
     for (const proxyTool of proxyTools) {
@@ -247,13 +272,17 @@ export class ProxyToolManager extends ToolManager {
       if (this.toolsetConfig.mode === "readWrite" || 
           (proxyTool.definition.annotations?.readOnlyHint !== false)) {
         this.enabledTools.add(proxyTool.definition.name);
+        console.error(`Enabled proxy tool: ${proxyTool.definition.name}`);
       }
     }
+    
+    console.error(`Total tools in manager: ${this.tools.size}`);
+    console.error(`Total enabled tools: ${this.enabledTools.size}`);
   }
 
   private createProxyTool(
     serverId: string,
-    originalTool: any,
+    originalTool: ToolDefinition,
     proxyToolName: string
   ): ToolCapability {
     const proxyToolDefinition: ProxyToolDefinition = {
@@ -370,5 +399,9 @@ export class ProxyToolManager extends ToolManager {
 
   getAllTools(): ToolCapability[] {
     return Array.from(this.tools.values());
+  }
+
+  getEnabledTools(): Set<string> {
+    return this.enabledTools;
   }
 }
