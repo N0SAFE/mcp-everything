@@ -130,7 +130,19 @@ export class BackendServerManager {
           throw new Error(`Unsupported transport type: ${config.transportType}`);
       }
 
-      await client.connect(transport);
+      console.error(`🔗 Attempting to connect to server: ${config.name} (${config.id})`);
+      
+      // Add timeout to connection attempt to prevent hanging
+      const connectPromise = client.connect(transport);
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error("Connection timeout - server did not respond to initialize request within 30 seconds"));
+        }, 30000);
+      });
+      
+      console.error(`⏳ Waiting for server ${config.id} to respond to initialize request...`);
+      await Promise.race([connectPromise, timeoutPromise]);
+      console.error(`✅ Server ${config.id} responded to initialize request successfully`);
 
       const connection: BackendServerConnection = {
         config,

@@ -1,65 +1,19 @@
 {
   "servers": [
     {
-      "id": "server-1",
-      "name": "Custom Server: Create server 1",
-      "description": "Generated custom MCP server: Create server 1",
+      "id": "test-server-disabled",
+      "name": "Test Server (Disabled)",
+      "description": "Disabled test server for testing purposes",
       "transportType": "stdio",
-      "enabled": true,
+      "enabled": false,
       "stdio": {
         "command": "echo",
-        "args": [
-          "1"
-        ],
+        "args": ["test"],
         "env": {}
       },
       "security": {
         "allowedTools": [],
         "requireAuth": false
-      },
-      "generated": true,
-      "generatedAt": "2025-07-20T19:06:06.776Z",
-      "instructions": {
-        "serverType": "custom",
-        "description": "Create server 1",
-        "capabilities": [],
-        "configuration": {
-          "command": "echo",
-          "args": [
-            "1"
-          ]
-        }
-      }
-    },
-    {
-      "id": "server-2",
-      "name": "Webhook Server: Create server 2",
-      "description": "Generated webhook MCP server: Create server 2",
-      "transportType": "stdio",
-      "enabled": true,
-      "stdio": {
-        "command": "node",
-        "args": [
-          "-e",
-          "\nconst { Server } = require('@modelcontextprotocol/sdk/server/index.js');\nconst { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');\n\nconst server = new Server(\n  {\n    name: 'generated-webhook-server',\n    version: '1.0.0',\n  },\n  {\n    capabilities: {\n      tools: {},\n    },\n  }\n);\n\nconst webhookUrl = process.env.WEBHOOK_URL;\nconst webhookSecret = process.env.WEBHOOK_SECRET;\n\nserver.setRequestHandler('tools/list', async () => {\n  return {\n    tools: [\n      {\n        name: 'send_webhook',\n        description: 'Send a webhook request',\n        inputSchema: {\n          type: 'object',\n          properties: {\n            payload: {\n              type: 'object',\n              description: 'Payload to send to webhook'\n            },\n            headers: {\n              type: 'object',\n              description: 'Additional headers'\n            }\n          },\n          required: ['payload']\n        }\n      }\n    ]\n  };\n});\n\nserver.setRequestHandler('tools/call', async (request) => {\n  if (request.params.name === 'send_webhook') {\n    try {\n      const { payload, headers = {} } = request.params.arguments;\n      \n      const response = await fetch(webhookUrl, {\n        method: 'POST',\n        headers: {\n          'Content-Type': 'application/json',\n          ...(webhookSecret && { 'X-Webhook-Secret': webhookSecret }),\n          ...headers\n        },\n        body: JSON.stringify(payload)\n      });\n\n      const responseData = await response.text();\n\n      return {\n        content: [\n          {\n            type: 'text',\n            text: `Webhook sent successfully. Status: ${response.status}, Response: ${responseData}`\n          }\n        ]\n      };\n    } catch (error) {\n      return {\n        content: [\n          {\n            type: 'text',\n            text: `Error sending webhook: ${error.message}`\n          }\n        ]\n      };\n    }\n  }\n});\n\nasync function main() {\n  const transport = new StdioServerTransport();\n  await server.connect(transport);\n}\n\nmain().catch(console.error);\n    "
-        ],
-        "env": {
-          "WEBHOOK_URL": "https://example.com/2"
-        }
-      },
-      "security": {
-        "allowedTools": [],
-        "requireAuth": false
-      },
-      "generated": true,
-      "generatedAt": "2025-07-20T19:06:06.958Z",
-      "instructions": {
-        "serverType": "webhook",
-        "description": "Create server 2",
-        "capabilities": [],
-        "configuration": {
-          "webhookUrl": "https://example.com/2"
-        }
       }
     }
   ],

@@ -261,51 +261,137 @@ export class OAuthProxyManager {
   getOAuthRouter(): RequestHandler {
     if (this._router) return this._router;
     
-    // For now, create a basic OAuth router that handles multiple servers
-    // In a full implementation, this would route to the appropriate provider based on the request
-    const firstProvider = Array.from(this.oauthProviders.values())[0];
-    
-    if (!firstProvider) {
-      // Return a no-op router if no OAuth providers are configured
-      return (req, res, next) => next();
-    }
-    
-    const routerOptions: AuthRouterOptions = {
-      provider: firstProvider,
-      issuerUrl: new URL(`${this.baseUrl}/oauth`),
-      baseUrl: new URL(this.baseUrl),
-      scopesSupported: ['read', 'write', 'admin'],
-      resourceName: 'MCP Proxy Server'
+    // Create a custom router that handles OAuth for multiple servers, especially GitHub
+    this._router = (req, res, next) => {
+      // Handle CORS preflight requests
+      if (req.method === 'OPTIONS') {
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        res.header('Access-Control-Max-Age', '86400');
+        return res.sendStatus(200);
+      }
+      
+      // Add CORS headers to all responses
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      
+      // Check if this is a GitHub OAuth request and proxy to GitHub
+      if (req.path.includes('authorize') || req.path.includes('token')) {
+        // Find GitHub server in OAuth servers
+        const githubServer = Array.from(this.oauthServers.values()).find(server => 
+          this.isGitHubMcpServer(server.config)
+        );
+        
+        if (githubServer) {
+          return this.handleGitHubOAuthRequest(req, res, githubServer);
+        }
+      }
+      
+      // For non-GitHub OAuth or other requests, use the standard MCP OAuth router
+      const firstProvider = Array.from(this.oauthProviders.values())[0];
+      
+      if (!firstProvider) {
+        return res.status(404).json({ error: 'No OAuth providers configured' });
+      }
+      
+      const routerOptions: AuthRouterOptions = {
+        provider: firstProvider,
+        issuerUrl: new URL(`${this.baseUrl}/oauth`),
+        baseUrl: new URL(this.baseUrl),
+        scopesSupported: ['read', 'write', 'admin'],
+        resourceName: 'MCP Proxy Server'
+      };
+      
+      const mcpRouter = mcpAuthRouter(routerOptions);
+      mcpRouter(req, res, next);
     };
     
-    this._router = mcpAuthRouter(routerOptions);
     return this._router;
+  }
+
+  /**
+   * Handle GitHub OAuth requests by proxying to actual GitHub OAuth endpoints
+   */
+  private handleGitHubOAuthRequest(req: any, res: any, githubServer: OAuthServerInfo): void {
+    try {
+      let targetUrl: string;
+      
+      if (req.path.includes('authorize')) {
+        // Proxy authorization requests to GitHub
+        targetUrl = 'https://github.com/login/oauth/authorize';
+        if (req.query) {
+          const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+          targetUrl += `?${queryString}`;
+        }
+      } else if (req.path.includes('token')) {
+        // Proxy token requests to GitHub
+        targetUrl = 'https://github.com/login/oauth/access_token';
+      } else {
+        return res.status(404).json({ error: 'Unknown OAuth endpoint' });
+      }
+      
+      // For authorization requests, redirect to GitHub
+      if (req.path.includes('authorize')) {
+        return res.redirect(targetUrl);
+      }
+      
+      // For token requests, we would need to proxy the POST request
+      // This is a simplified implementation - in production, you'd want proper token handling
+      res.json({ 
+        authorization_url: githubServer.authorizationUrl,
+        token_url: githubServer.tokenUrl,
+        message: 'Use the authorization_url to start OAuth flow'
+      });
+      
+    } catch (error) {
+      console.error('Error handling GitHub OAuth request:', error);
+      res.status(500).json({ error: 'OAuth request failed' });
+    }
   }
 
   /**
    * Get OAuth metadata router
    */
   getOAuthMetadataRouter(): RequestHandler {
-    const oauthMetadata: OAuthMetadata = {
-      issuer: `${this.baseUrl}/oauth`,
-      authorization_endpoint: `${this.baseUrl}/oauth/authorize`,
-      token_endpoint: `${this.baseUrl}/oauth/token`,
-      jwks_uri: `${this.baseUrl}/oauth/jwks`,
-      scopes_supported: ['read', 'write', 'admin'],
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code', 'refresh_token'],
-      token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
-      code_challenge_methods_supported: ['S256']
+    return (req, res, next) => {
+      // Handle CORS preflight requests
+      if (req.method === 'OPTIONS') {
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+        res.header('Access-Control-Max-Age', '86400');
+        return res.sendStatus(200);
+      }
+      
+      // Add CORS headers to all responses
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+      
+      const oauthMetadata: OAuthMetadata = {
+        issuer: `${this.baseUrl}/oauth`,
+        authorization_endpoint: `${this.baseUrl}/oauth/authorize`,
+        token_endpoint: `${this.baseUrl}/oauth/token`,
+        jwks_uri: `${this.baseUrl}/oauth/jwks`,
+        scopes_supported: ['read', 'write', 'admin'],
+        response_types_supported: ['code'],
+        grant_types_supported: ['authorization_code', 'refresh_token'],
+        token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post'],
+        code_challenge_methods_supported: ['S256']
+      };
+      
+      const metadataOptions: AuthMetadataOptions = {
+        oauthMetadata,
+        resourceServerUrl: new URL(this.baseUrl),
+        scopesSupported: ['read', 'write', 'admin'],
+        resourceName: 'MCP Proxy Server'
+      };
+      
+      const metadataRouter = mcpAuthMetadataRouter(metadataOptions);
+      metadataRouter(req, res, next);
     };
-    
-    const metadataOptions: AuthMetadataOptions = {
-      oauthMetadata,
-      resourceServerUrl: new URL(this.baseUrl),
-      scopesSupported: ['read', 'write', 'admin'],
-      resourceName: 'MCP Proxy Server'
-    };
-    
-    return mcpAuthMetadataRouter(metadataOptions);
   }
 
   /**

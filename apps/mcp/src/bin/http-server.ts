@@ -249,31 +249,46 @@ export class McpHttpServerManager {
   private setupOAuthRoutes(app: express.Application, proxyServer: ProxyMcpServer) {
     const oauthManager = proxyServer.backend.getOAuthManager();
     
-    // Add OAuth metadata endpoint with CORS
-    app.get('/.well-known/oauth-authorization-server', (req, res) => {
+    // Enhanced CORS middleware for OAuth routes
+    const oauthCorsMiddleware = (req: any, res: any, next: any) => {
+      // Set comprehensive CORS headers
       res.header('Access-Control-Allow-Origin', '*');
-      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Max-Age', '86400');
       
+      // Handle preflight OPTIONS requests
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+      }
+      
+      next();
+    };
+    
+    // Apply CORS middleware to all OAuth routes
+    app.use('/.well-known', oauthCorsMiddleware);
+    app.use('/oauth', oauthCorsMiddleware);
+    
+    // Add OAuth metadata endpoint
+    app.get('/.well-known/oauth-authorization-server', (req, res) => {
       const metadataRouter = oauthManager.getOAuthMetadataRouter();
       metadataRouter(req, res, () => {});
     });
     
-    // Add OAuth authorization endpoint with CORS
+    // Mount OAuth router with enhanced error handling
     app.use('/oauth', (req, res, next) => {
-      res.header('Access-Control-Allow-Origin', '*');
-      res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-      
-      if (req.method === 'OPTIONS') {
-        res.sendStatus(200);
-        return;
+      try {
+        const oauthRouter = oauthManager.getOAuthRouter();
+        oauthRouter(req, res, next);
+      } catch (error) {
+        console.error('OAuth router error:', error);
+        res.status(500).json({ 
+          error: 'OAuth request failed', 
+          details: error instanceof Error ? error.message : String(error)
+        });
       }
-      next();
     });
-    
-    // Mount OAuth router
-    app.use('/oauth', oauthManager.getOAuthRouter());
     
     // OAuth server information endpoint
     app.get('/mcp/oauth/servers', (req, res) => {
