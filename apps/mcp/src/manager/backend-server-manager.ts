@@ -10,7 +10,7 @@ import {
   AuthInfo,
 } from "../types.js";
 import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { McpOAuthServerProvider } from "./mcp-oauth-server-provider.js";
+import { OAuthConsolidationManager } from "./oauth-consolidation-manager.js";
 
 export interface BackendServerConnection {
   config: BackendServerConfig;
@@ -35,10 +35,10 @@ export class BackendServerManager {
   private failedServers: Map<string, FailedServerAttempt> = new Map();
   private reconnectIntervals: Map<string, NodeJS.Timeout> = new Map();
   private _initialized: Promise<void>;
-  private oauthProvider: McpOAuthServerProvider;
+  private oauthConsolidationManager: OAuthConsolidationManager;
 
-  constructor(private serverConfigs: BackendServerConfig[], oauthProvider?: McpOAuthServerProvider) {
-    this.oauthProvider = oauthProvider || new McpOAuthServerProvider();
+  constructor(private serverConfigs: BackendServerConfig[], oauthConsolidationManager?: OAuthConsolidationManager) {
+    this.oauthConsolidationManager = oauthConsolidationManager || new OAuthConsolidationManager();
     this._initialized = this.initializeServers();
   }
 
@@ -66,11 +66,11 @@ export class BackendServerManager {
   private async initializeServers() {
     console.error(`Initializing ${this.serverConfigs.length} backend servers...`);
     
-    // Register OAuth-enabled servers with the OAuth provider
+    // Register OAuth-enabled servers with the OAuth consolidation manager
     for (const config of this.serverConfigs) {
       if (config.enabled && this.needsOAuth(config)) {
         console.error(`🔐 Registering OAuth server: ${config.id} (${config.name})`);
-        await this.oauthProvider.registerServer(config.id, config);
+        await this.oauthConsolidationManager.registerOAuthRequirement(config.id, config);
       }
     }
     
@@ -180,10 +180,10 @@ export class BackendServerManager {
       
       const errorMessage = error instanceof Error ? error.message : String(error);
       
-      // Check if this is an OAuth-related error and register with OAuth provider
-      if (this.isOAuthError(errorMessage) && !this.oauthProvider.serverNeedsOAuth(config.id)) {
-        console.error(`🔐 OAuth requirement detected for server ${config.id}, registering with OAuth provider`);
-        await this.oauthProvider.registerServer(config.id, config);
+      // Check if this is an OAuth-related error and register with OAuth consolidation manager
+      if (this.isOAuthError(errorMessage)) {
+        console.error(`🔐 OAuth requirement detected for server ${config.id}, registering with OAuth consolidation manager`);
+        await this.oauthConsolidationManager.detectOAuthFromError(config.id, config, errorMessage);
       }
       
       // Track failed server attempt
@@ -458,24 +458,25 @@ export class BackendServerManager {
   }
 
   /**
-   * Get the OAuth provider
+   * Get the OAuth consolidation manager
    */
-  getOAuthManager(): McpOAuthServerProvider {
-    return this.oauthProvider;
+  getOAuthManager(): OAuthConsolidationManager {
+    return this.oauthConsolidationManager;
   }
 
   /**
    * Get servers that need OAuth authentication
    */
   getOAuthServers() {
-    return this.oauthProvider.getAllOAuthServers();
+    return this.oauthConsolidationManager.getOAuthRequirements();
   }
 
   /**
    * Check if a server needs OAuth
    */
   serverNeedsOAuth(serverId: string): boolean {
-    return this.oauthProvider.serverNeedsOAuth(serverId);
+    const requirements = this.oauthConsolidationManager.getOAuthRequirements();
+    return requirements.some(req => req.serverId === serverId && req.needsOAuth);
   }
 
   /**

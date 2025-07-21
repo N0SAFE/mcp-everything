@@ -745,7 +745,8 @@ export class DevToolManager {
               
               // Check OAuth status for failed servers
               const needsOAuth = this.backendServerManager.serverNeedsOAuth(server.config.id);
-              const oauthInfo = this.backendServerManager.getOAuthManager().getOAuthServerInfo(server.config.id);
+              const oauthRequirements = this.backendServerManager.getOAuthManager().getOAuthRequirements();
+              const oauthInfo = oauthRequirements.find(req => req.serverId === server.config.id);
               if (needsOAuth) {
                 statusMessage.push(`      🔐 OAuth: Required (detected from error)`);
                 if (oauthInfo?.authorizationUrl) {
@@ -1475,18 +1476,18 @@ export class DevToolManager {
           ``,
         ];
 
-        // Get OAuth diagnostics from the backend server manager
+        // Get OAuth diagnostics from the OAuth consolidation manager
         const oauthManager = this.backendServerManager.getOAuthManager();
-        const oauthDiagnostics = oauthManager.getOAuthDiagnostics();
-        const oauthServers = oauthManager.getAllOAuthServers();
+        const oauthDiagnostics = oauthManager.getDiagnostics();
+        const oauthRequirements = oauthManager.getOAuthRequirements();
 
         // Overview
         diagnosticsMessage.push(
-          `📊 OAuth Overview:`,
-          `   Total servers analyzed: ${oauthDiagnostics.totalServers}`,
-          `   Servers requiring OAuth: ${oauthDiagnostics.needsOAuth}`,
-          `   OAuth configurations active: ${oauthDiagnostics.configured}`,
-          `   Servers with OAuth errors: ${oauthDiagnostics.errors}`,
+          `📊 OAuth Consolidation Overview:`,
+          `   Total servers analyzed: ${oauthDiagnostics.totalRequirements}`,
+          `   Active OAuth clients: ${oauthDiagnostics.activeClients}`,
+          `   Registered clients: ${oauthDiagnostics.registeredClients}`,
+          `   Consolidated scopes: ${oauthDiagnostics.consolidatedScopes.join(', ')}`,
           ``
         );
 
@@ -1500,31 +1501,29 @@ export class DevToolManager {
             ``
           );
         } else {
-          diagnosticsMessage.push(`🔍 OAuth Server Details:`);
+          diagnosticsMessage.push(`🔍 OAuth Requirement Details:`);
 
-          for (const server of oauthServers) {
-            const statusEmoji = server.needsOAuth ? '🔐' : '✅';
-            const configuredEmoji = oauthDiagnostics.servers.find((s: any) => s.serverId === server.serverId)?.configured ? '✅' : '❌';
+          for (const requirement of oauthRequirements) {
+            const statusEmoji = requirement.needsOAuth ? '🔐' : '✅';
             
             diagnosticsMessage.push(
-              `   ${statusEmoji} ${server.config.name} (${server.serverId})`,
-              `      OAuth Required: ${server.needsOAuth ? 'Yes' : 'No'}`,
-              `      OAuth Detected: ${server.oauthDetected ? 'Yes' : 'No'}`,
-              `      Configuration: ${configuredEmoji} ${oauthDiagnostics.servers.find((s: any) => s.serverId === server.serverId)?.configured ? 'Active' : 'Pending'}`,
-              `      Transport: ${server.config.transportType}`
+              `   ${statusEmoji} ${requirement.config.name} (${requirement.serverId})`,
+              `      OAuth Required: ${requirement.needsOAuth ? 'Yes' : 'No'}`,
+              `      Scopes: ${requirement.scopes.join(', ')}`,
+              `      Transport: ${requirement.config.transportType}`
             );
 
-            if (server.lastOAuthError) {
-              diagnosticsMessage.push(`      Last Error: ${server.lastOAuthError}`);
+            if (requirement.lastError) {
+              diagnosticsMessage.push(`      Last Error: ${requirement.lastError}`);
             }
 
             if (showUrls) {
               diagnosticsMessage.push(
-                `      Authorization URL: ${server.authorizationUrl || 'Not configured'}`,
-                `      Token URL: ${server.tokenUrl || 'Not configured'}`
+                `      Authorization URL: ${requirement.authorizationUrl || 'Not configured'}`,
+                `      Token URL: ${requirement.tokenUrl || 'Not configured'}`
               );
-              if (server.revocationUrl) {
-                diagnosticsMessage.push(`      Revocation URL: ${server.revocationUrl}`);
+              if (requirement.revocationUrl) {
+                diagnosticsMessage.push(`      Revocation URL: ${requirement.revocationUrl}`);
               }
             }
 
@@ -1560,17 +1559,17 @@ export class DevToolManager {
           }
         }
 
-        if (checkStatus && oauthServers.length > 0) {
+        if (checkStatus && oauthRequirements.length > 0) {
           diagnosticsMessage.push(
             `🔍 OAuth Endpoint Status Checks:`,
             ``
           );
 
-          for (const server of oauthServers) {
-            if (server.config.transportType === 'http' || server.config.transportType === 'sse') {
+          for (const requirement of oauthRequirements) {
+            if (requirement.config.transportType === 'http' || requirement.config.transportType === 'sse') {
               try {
-                const metadataUrl = server.metadataUrl || (server.authorizationUrl ? server.authorizationUrl.replace('/oauth/authorize', '/.well-known/oauth-authorization-server') : undefined);
-                diagnosticsMessage.push(`   Testing ${server.config.name}...`);
+                const metadataUrl = requirement.metadataUrl || (requirement.authorizationUrl ? requirement.authorizationUrl.replace('/oauth/authorize', '/.well-known/oauth-authorization-server') : undefined);
+                diagnosticsMessage.push(`   Testing ${requirement.config.name}...`);
                 
                 // This would be implemented to actually test OAuth endpoints
                 // For now, just show the intended check
@@ -1642,7 +1641,8 @@ export class DevToolManager {
         }
 
         // Auto-fix suggestions
-        if (oauthDiagnostics.errors > 0 || potentialOAuthServers.length > 0) {
+        const hasErrors = oauthRequirements.some(req => req.lastError);
+        if (hasErrors || potentialOAuthServers.length > 0) {
           diagnosticsMessage.push(
             `🔧 Auto-Fix Suggestions:`,
             ``
@@ -1654,7 +1654,7 @@ export class DevToolManager {
             diagnosticsMessage.push(`   • Check network connectivity to OAuth servers`);
           }
 
-          if (oauthDiagnostics.configured < oauthDiagnostics.needsOAuth) {
+          if (oauthDiagnostics.activeClients < oauthDiagnostics.totalRequirements) {
             diagnosticsMessage.push(`   • Complete OAuth proxy configuration for pending servers`);
             diagnosticsMessage.push(`   • Verify OAuth client credentials are available`);
           }
