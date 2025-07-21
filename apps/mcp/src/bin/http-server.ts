@@ -319,7 +319,7 @@ export class McpHttpServerManager {
         
         // Default OAuth server list if no specific server
         const oauthServers = oauthProvider.getAllOAuthServers();
-        const serverList = oauthServers.map(server => ({
+        const serverList = oauthServers.map((server: { serverId: string; config: { name?: string } }) => ({
           serverId: server.serverId,
           serverName: server.config.name,
           authorizationUrl: `${req.protocol}://${req.get('host')}/oauth/authorize?server_id=${server.serverId}&client_id=${client_id}&redirect_uri=${redirect_uri}&scope=${scope || 'read'}&state=${state || ''}&code_challenge=${code_challenge || ''}`

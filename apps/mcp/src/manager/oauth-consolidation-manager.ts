@@ -766,4 +766,33 @@ export class OAuthConsolidationManager implements OAuthServerProvider {
       }
     }
   }
+
+  /**
+   * Get OAuth server information for a specific server ID
+   */
+  getOAuthServerInfo(serverId: string): { provider: OAuthServerProvider; clientStore: OAuthRegisteredClientsStore; serverId: string; config: BackendServerConfig } | null {
+    const requirement = this.oauthRequirements.get(serverId);
+    if (!requirement) {
+      return null;
+    }
+
+    return {
+      provider: this,
+      clientStore: this._clientsStore,
+      serverId: requirement.serverId,
+      config: requirement.config
+    };
+  }
+
+  /**
+   * Get all OAuth servers that have been registered
+   */
+  getAllOAuthServers(): Array<{ serverId: string; config: BackendServerConfig; provider: OAuthServerProvider; clientStore: OAuthRegisteredClientsStore }> {
+    return Array.from(this.oauthRequirements.values()).map(requirement => ({
+      serverId: requirement.serverId,
+      config: requirement.config,
+      provider: this,
+      clientStore: this._clientsStore
+    }));
+  }
 }

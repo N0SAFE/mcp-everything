@@ -1480,6 +1480,7 @@ export class DevToolManager {
         const oauthManager = this.backendServerManager.getOAuthManager();
         const oauthDiagnostics = oauthManager.getDiagnostics();
         const oauthRequirements = oauthManager.getOAuthRequirements();
+        const oauthServers = oauthManager.getAllOAuthServers();
 
         // Overview
         diagnosticsMessage.push(
