@@ -124,31 +124,47 @@ export class ProxyToolManager extends ToolManager {
 
     return [
       createTool(serverListTool, async (params) => {
-        const connections = backendServerManager.getAllConnections();
-        const filteredConnections = params.includeDisabled
-          ? connections
-          : connections.filter(conn => conn.config.enabled);
+        const allServers = params.includeDisabled 
+          ? backendServerManager.getAllServerStatuses()
+          : backendServerManager.getAllConnections();
 
-        const servers = filteredConnections.map(conn => {
+        const servers = allServers.map(serverOrConnection => {
+          // Handle both BackendServerConnection and FailedServerAttempt
+          const isConnection = 'client' in serverOrConnection;
+          const config = serverOrConnection.config;
+          const status = serverOrConnection.status;
+          
           const basic = {
-            id: conn.config.id,
-            name: conn.config.name,
-            description: conn.config.description,
-            transportType: conn.config.transportType,
-            enabled: conn.config.enabled,
-            connected: conn.status.connected,
-            toolsCount: conn.status.toolsCount,
+            id: config.id,
+            name: config.name,
+            description: config.description,
+            transportType: config.transportType,
+            enabled: config.enabled,
+            connected: status.connected,
+            toolsCount: status.toolsCount || 0,
           };
 
           if (params.includeDetails) {
-            return {
+            const details = {
               ...basic,
-              lastConnected: conn.status.lastConnected,
-              lastError: conn.status.lastError,
-              resourcesCount: conn.status.resourcesCount,
-              promptsCount: conn.status.promptsCount,
-              security: conn.config.security,
+              lastConnected: status.lastConnected,
+              lastError: status.lastError,
+              resourcesCount: status.resourcesCount || 0,
+              promptsCount: status.promptsCount || 0,
+              security: config.security,
             };
+
+            // Add additional info for failed servers
+            if (!isConnection && 'attemptCount' in serverOrConnection) {
+              return {
+                ...details,
+                attemptCount: serverOrConnection.attemptCount,
+                firstFailure: serverOrConnection.firstFailure,
+                lastAttempt: serverOrConnection.lastAttempt,
+              };
+            }
+
+            return details;
           }
 
           return basic;
@@ -162,6 +178,9 @@ export class ProxyToolManager extends ToolManager {
                 servers,
                 totalServers: servers.length,
                 connectedServers: servers.filter(s => s.connected).length,
+                disconnectedServers: servers.filter(s => !s.connected).length,
+                enabledServers: servers.filter(s => s.enabled).length,
+                disabledServers: servers.filter(s => !s.enabled).length,
               }, null, 2),
             },
           ],
