@@ -58,7 +58,7 @@
         "@repo/directus-sdk": "*",
         "class-variance-authority": "catalog:ui",
         "clsx": "catalog:styling",
-        "concurrently": "^8.2.2",
+        "concurrently": "^9.2.0",
         "framer-motion": "catalog:ui",
         "lucide-react": "catalog:ui",
         "next-themes": "catalog:next",
